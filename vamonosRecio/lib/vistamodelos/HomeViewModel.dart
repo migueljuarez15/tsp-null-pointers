@@ -127,10 +127,6 @@ class HomeViewModel extends ChangeNotifier {
         points: puntos,
       ),
     };
-
     notifyListeners();
   }
-
-  
-
 }

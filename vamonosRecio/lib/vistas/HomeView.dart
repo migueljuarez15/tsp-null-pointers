@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:vamonos_recio/modelos/ParadaModel.dart';
 import 'package:vamonos_recio/modelos/SitioModel.dart';
 import 'package:vamonos_recio/vistamodelos/HomeViewModel.dart';
+import 'package:vamonos_recio/vistamodelos/RecorridoViewModel.dart';
 import '../services/DatabaseHelper.dart';
 import '../services/MapService.dart';
 import 'BusquedaView.dart';
@@ -200,6 +201,7 @@ class _HomeViewState extends State<HomeView> {
   @override
   Widget build(BuildContext context) {
     final viewModel = Provider.of<HomeViewModel>(context);
+    final recorridoVM = context.read<RecorridoViewModel>();
     final primary = const Color(0xFF137fec);
 
     return Scaffold(
@@ -218,9 +220,10 @@ class _HomeViewState extends State<HomeView> {
                   await _cargarParadasOptimizado();
                 }
               },
-              polylines: viewModel.polylines,
+              markers: recorridoVM.marcadores,
+              polylines: recorridoVM.polylines,
               circles: _circulos,
-              markers: _markers.union(viewModel.marcadores), // 👈 marcador del destino
+              //markers: _markers.union(viewModel.marcadores), // 👈 marcador del destino
               myLocationEnabled: true,
               myLocationButtonEnabled: true,
               zoomControlsEnabled: false,
@@ -251,7 +254,7 @@ class _HomeViewState extends State<HomeView> {
 
                     // 👇 Llama al ViewModel (solo si estás en modo camión)
                     if (!switchModo) {
-                      await viewModel.dibujarRutaHaciaDestino(destino);
+                      await recorridoVM.dibujarRutaDesdeBD(1); // ← ID de la ruta seleccionada
                     }
 
                     // 🔹 Actualiza el texto de la barra de búsqueda

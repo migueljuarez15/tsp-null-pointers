@@ -1,125 +1,103 @@
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../modelos/ParadaModel.dart';
 import '../modelos/RutaModel.dart';
 import '../modelos/RecorridoModel.dart';
 import '../services/DatabaseHelper.dart';
-import '../services/MapService.dart';
+import '../services/OSRMService.dart';
+import 'dart:math';
 
 class RecorridoViewModel extends ChangeNotifier {
   final _db = DatabaseHelper();
-  final _mapService = MapService();
-
-  bool modoCamion = true;
-  bool mostrandoMensaje = true;
 
   Set<Polyline> polylines = {};
-  Set<Circle> circles = {};
-  String? mensajeTemporal;
+  Set<Marker> marcadores = {};
+  bool cargando = false;
 
-  double _zoomActual = 13;
-
-  /// Inicialización
-  Future<void> inicializar() async {
-    await cargarContenido();
-    Future.delayed(const Duration(seconds: 3), () {
-      mostrandoMensaje = false;
-      notifyListeners();
-    });
-  }
-
-  /// Alternar entre rutas y paradas
-  Future<void> toggleModo() async {
-    modoCamion = !modoCamion;
-    mostrandoMensaje = true;
-    mensajeTemporal = modoCamion
-        ? "Mostrando rutas de camión 🚌"
-        : "Mostrando sitios/paradas 🚕";
+  /// 🔹 Dibuja la ruta completa (según los registros de BD)
+  Future<void> dibujarRutaDesdeBD(int idRuta) async {
+    cargando = true;
     notifyListeners();
 
-    await cargarContenido();
-
-    Future.delayed(const Duration(seconds: 3), () {
-      mostrandoMensaje = false;
-      notifyListeners();
-    });
-  }
-
-  /// Cargar datos según modo
-  Future<void> cargarContenido() async {
-    if (modoCamion) {
-      await cargarRutasCompletas();
-    } else {
-      await cargarParadasEnMapa(_zoomActual);
-    }
-  }
-
-  /// Cargar todas las rutas con sus recorridos y trazarlas
-  Future<void> cargarRutasCompletas() async {
     try {
-      final rutas = await _db.obtenerRutas();
+      // 1️⃣ Obtener datos base desde la BD
       final recorridos = await _db.obtenerRecorridos();
       final paradas = await _db.obtenerParadas();
+      final rutas = await _db.obtenerRutas();
 
-      final allPolylines = <Polyline>{};
-      for (final ruta in rutas) {
-        final paradasRuta = recorridos
-            .where((r) => r.idRuta == ruta.idRuta)
-            .map((r) => paradas.firstWhere((p) => p.idParada == r.idParada))
-            .toList();
+      // 2️⃣ Filtrar los recorridos de esa ruta y ordenarlos
+      final recorridosRuta = recorridos
+          .where((r) => r.idRuta == idRuta)
+          .toList()
+        ..sort((a, b) => a.orden.compareTo(b.orden));
 
-        final poly = _mapService.generarPolyline(paradasRuta, ruta.color);
-        allPolylines.addAll(poly);
+      if (recorridosRuta.isEmpty) {
+        debugPrint("❌ No hay registros de recorrido para la ruta $idRuta.");
+        return;
       }
 
-      polylines = allPolylines;
-      circles.clear();
-      notifyListeners();
+      final ruta = rutas.firstWhere((r) => r.idRuta == idRuta);
+
+      // 3️⃣ Convertir a lista de paradas ordenadas
+      List<ParadaModel> paradasRuta = [];
+      for (var r in recorridosRuta) {
+        final p = paradas.firstWhere((p) => p.idParada == r.idParada);
+        paradasRuta.add(p);
+      }
+
+      // 4️⃣ Consultar OSRM para cada tramo consecutivo
+      List<LatLng> puntosTotales = [];
+      for (int i = 0; i < paradasRuta.length - 1; i++) {
+        final origen = LatLng(paradasRuta[i].latitud, paradasRuta[i].longitud);
+        final destino = LatLng(paradasRuta[i + 1].latitud, paradasRuta[i + 1].longitud);
+
+        final puntosSegmento = await OSRMService.obtenerRutaOSRM(origen, destino);
+        if (puntosSegmento.isNotEmpty) {
+          puntosTotales.addAll(puntosSegmento);
+        } else {
+          // En caso de fallo en OSRM, se conecta directo
+          puntosTotales.addAll([origen, destino]);
+        }
+      }
+
+      // 5️⃣ Dibujar la polyline
+      polylines = {
+        Polyline(
+          polylineId: PolylineId('ruta_$idRuta'),
+          points: puntosTotales,
+          color: _colorDesdeHex(ruta.color),
+          width: 6,
+        )
+      };
+
+      // 6️⃣ Agregar marcadores para inicio y fin
+      marcadores = {
+        Marker(
+          markerId: const MarkerId('inicio'),
+          position: LatLng(paradasRuta.first.latitud, paradasRuta.first.longitud),
+          infoWindow: InfoWindow(title: "Inicio: ${paradasRuta.first.nombre}"),
+        ),
+        Marker(
+          markerId: const MarkerId('fin'),
+          position: LatLng(paradasRuta.last.latitud, paradasRuta.last.longitud),
+          infoWindow: InfoWindow(title: "Fin: ${paradasRuta.last.nombre}"),
+        ),
+      };
+
+      debugPrint("✅ Ruta ${ruta.nombre} trazada correctamente con ${puntosTotales.length} puntos.");
+
     } catch (e) {
-      debugPrint("Error cargando rutas: $e");
+      debugPrint("⚠️ Error al dibujar ruta desde BD: $e");
+    } finally {
+      cargando = false;
+      notifyListeners();
     }
   }
 
-  /// Cargar paradas desde DB con optimización por zoom
-  Future<void> cargarParadasEnMapa(double zoom) async {
-    try {
-      final paradas = await _db.obtenerParadas();
-      _zoomActual = zoom;
-
-      int maxCircles = zoom >= 16
-          ? paradas.length // Zoom alto, todas
-          : zoom >= 14
-              ? (paradas.length / 3).round()
-              : (paradas.length / 8).round();
-
-      final paradasFiltradas =
-          paradas.take(maxCircles.clamp(10, paradas.length)).toList();
-
-      circles = paradasFiltradas.map((p) {
-        return Circle(
-          circleId: CircleId(p.idParada.toString()),
-          center: LatLng(p.latitud, p.longitud),
-          radius: 15,
-          fillColor: const Color(0xFF00BCD4).withOpacity(0.5),
-          strokeColor: const Color(0xFF00838F),
-          strokeWidth: 2,
-          onTap: () {
-            mensajeTemporal = "📍 ${p.nombre}";
-            mostrandoMensaje = true;
-            notifyListeners();
-            Future.delayed(const Duration(seconds: 2), () {
-              mostrandoMensaje = false;
-              notifyListeners();
-            });
-          },
-        );
-      }).toSet();
-
-      polylines.clear();
-      notifyListeners();
-    } catch (e) {
-      debugPrint("Error cargando paradas: $e");
-    }
+  /// Utilidad: convertir color HEX de BD a Color Flutter
+  Color _colorDesdeHex(String hexColor) {
+    hexColor = hexColor.replaceAll("#", "");
+    if (hexColor.length == 6) hexColor = "FF$hexColor";
+    return Color(int.parse("0x$hexColor"));
   }
 }
