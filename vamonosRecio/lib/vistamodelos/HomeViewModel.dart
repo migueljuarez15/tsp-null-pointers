@@ -102,6 +102,23 @@ class HomeViewModel extends ChangeNotifier {
       destino,
     ];
 
+    marcadores = {
+    Marker(
+      markerId: const MarkerId("parada_destino"),
+      position: LatLng(paradaDestino.latitud, paradaDestino.longitud),
+      infoWindow: InfoWindow(
+        title: "🚏 Parada cercana destino",
+        snippet: "${paradaDestino.nombre} (ID: ${paradaDestino.idParada})",
+      ),
+      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+    ),
+    Marker(
+      markerId: const MarkerId("destino"),
+      position: destino,
+      infoWindow: const InfoWindow(title: "🎯 Destino"),
+    ),
+  };
+
     polylines = {
       Polyline(
         polylineId: const PolylineId("ruta_realista"),
@@ -113,4 +130,7 @@ class HomeViewModel extends ChangeNotifier {
 
     notifyListeners();
   }
+
+  
+
 }

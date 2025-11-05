@@ -220,7 +220,7 @@ class _HomeViewState extends State<HomeView> {
               },
               polylines: viewModel.polylines,
               circles: _circulos,
-              markers: _markers, // 👈 marcador del destino
+              markers: _markers.union(viewModel.marcadores), // 👈 marcador del destino
               myLocationEnabled: true,
               myLocationButtonEnabled: true,
               zoomControlsEnabled: false,
