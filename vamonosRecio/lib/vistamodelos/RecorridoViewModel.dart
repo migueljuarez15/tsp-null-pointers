@@ -22,6 +22,20 @@ class RecorridoViewModel extends ChangeNotifier {
   bool _cargando = false;
   bool get cargando => _cargando;
 
+  /// 🎨 Colores personalizados para rutas
+  final Map<int, Color> coloresRutas = {
+    1: const Color.fromARGB(255, 133, 205, 238),
+    2: const Color.fromARGB(255, 8, 83, 0),
+    3: const Color.fromARGB(255, 170, 170, 170),
+    4: const Color.fromARGB(255, 54, 54, 248),
+    8: const Color.fromARGB(255, 223, 104, 0),
+    14: const Color.fromARGB(255, 219, 166, 32),
+    15: const Color.fromARGB(255, 129, 0, 129),
+    16: const Color.fromARGB(255, 214, 214, 34),
+    17: const Color.fromARGB(255, 48, 199, 53),
+    21: const Color.fromARGB(255, 255, 0, 0)
+  };
+
   /// 📍 Marca el destino en el mapa
   void marcarDestino(LatLng destino) {
     _destinoSeleccionado = destino;
@@ -87,8 +101,8 @@ class RecorridoViewModel extends ChangeNotifier {
         return;
       }
 
-      // 🔹 Color variable según la ruta
-      final colorRuta = Colors.primaries[idRuta % Colors.primaries.length];
+      // 🔹 Color según la ruta
+      final colorRuta = coloresRutas[idRuta] ?? Colors.blueGrey;
 
       // 🔹 Agrega la polyline principal al mapa
       _polylines.add(
@@ -107,6 +121,15 @@ class RecorridoViewModel extends ChangeNotifier {
       _cargando = false;
       notifyListeners();
     }
+  }
+
+  /// 🚿 Limpieza completa del mapa (rutas, marcadores, destino, rutas candidatas)
+  void resetearTodo() {
+    _polylines.clear();
+    _marcadores.clear();
+    _rutasCandidatas.clear();
+    _destinoSeleccionado = null;
+    notifyListeners();
   }
 
   /// 🔍 Buscar rutas que pasen cerca del destino (radio dinámico)

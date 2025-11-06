@@ -26,7 +26,6 @@ class _HomeViewState extends State<HomeView> {
   bool switchModo = false;
   bool mostrandoMensaje = true;
   double _zoomActual = 13;
-  LatLng? _ubicacionActual;
   LatLng? _destinoSeleccionado;
 
   List<ParadaModel> _todasParadas = [];
@@ -78,12 +77,6 @@ class _HomeViewState extends State<HomeView> {
           fillColor: const Color(0xFF137fec).withOpacity(0.5),
           strokeColor: Colors.blueAccent,
           strokeWidth: 1,
-          consumeTapEvents: true,
-          onTap: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(p.nombre)),
-            );
-          },
         ),
       );
     }
@@ -117,12 +110,6 @@ class _HomeViewState extends State<HomeView> {
           fillColor: const Color.fromARGB(255, 236, 76, 76).withOpacity(0.5),
           strokeColor: const Color.fromARGB(255, 255, 44, 44),
           strokeWidth: 1,
-          consumeTapEvents: true,
-          onTap: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(s.nombre)),
-            );
-          },
         ),
       );
     }
@@ -141,12 +128,10 @@ class _HomeViewState extends State<HomeView> {
     });
   }
 
-  /// 📍 Marca el destino y lo comunica al ViewModel
   void _marcarDestino(LatLng destino) async {
     final recorridoVM = context.read<RecorridoViewModel>();
     setState(() => _destinoSeleccionado = destino);
     recorridoVM.marcarDestino(destino);
-    // 🔹 Aquí está la clave: buscar rutas cercanas al destino
     await recorridoVM.buscarRutasCercanas(destino);
   }
 
@@ -160,10 +145,8 @@ class _HomeViewState extends State<HomeView> {
         child: Stack(
           children: [
             GoogleMap(
-              initialCameraPosition: CameraPosition(
-                target: MapService.centroZacatecas,
-                zoom: 13,
-              ),
+              initialCameraPosition:
+                  CameraPosition(target: MapService.centroZacatecas, zoom: 13),
               onMapCreated: (controller) => mapController = controller,
               onCameraMove: (position) async {
                 _zoomActual = position.zoom;
@@ -177,7 +160,7 @@ class _HomeViewState extends State<HomeView> {
               zoomControlsEnabled: false,
             ),
 
-            /// 🔍 Barra de búsqueda
+            // 🔍 Barra de búsqueda
             Positioned(
               top: 12,
               left: 12,
@@ -190,134 +173,38 @@ class _HomeViewState extends State<HomeView> {
                   );
 
                   if (resultado != null && mapController != null) {
+                    // 🧹 Limpieza total antes de marcar nuevo destino
+                    final recorridoVM = context.read<RecorridoViewModel>();
+                    recorridoVM.resetearTodo();
+
                     final LatLng destino = resultado['coordenadas'];
                     final String nombre = resultado['nombre'];
-
                     mapController!.animateCamera(
                       CameraUpdate.newLatLngZoom(destino, 15),
                     );
-
                     _marcarDestino(destino);
-
-                    // ⚙️ Solo si estamos en modo camión, dibuja la ruta completa
-                    /*if (!switchModo) {
-                      await recorridoVM.dibujarRutaDesdeBD(1);
-                    }*/
-
-                    setState(() {
-                      _textoBusqueda = nombre;
-                    });
+                    setState(() => _textoBusqueda = nombre);
+                    setState(() {_rutaSeleccionadaId = null;});
                   }
                 },
-                child: Container(
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(999),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.15),
-                        blurRadius: 6,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
-                  ),
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  alignment: Alignment.centerLeft,
-                  child: Row(
-                    children: [
-                      const Icon(Icons.search, color: Colors.grey),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Text(
-                          _textoBusqueda,
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: Colors.grey[700],
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 1,
-                          softWrap: false,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                child: _buildSearchBar(),
               ),
             ),
 
-            /// 🧭 Dropdown de rutas cercanas
-            if (_destinoSeleccionado != null && recorridoVM.rutasCandidatas.isNotEmpty)
+            // 🧭 Dropdown de rutas
+            if (_destinoSeleccionado != null &&
+                recorridoVM.rutasCandidatas.isNotEmpty)
               Positioned(
                 top: 70,
                 left: 12,
                 right: 12,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.15),
-                        blurRadius: 6,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      isExpanded: true,
-                      value: _rutaSeleccionadaId,
-                      hint: const Text("Selecciona una ruta cercana"),
-                      items: recorridoVM.rutasCandidatas.map((ruta) {
-                        return DropdownMenuItem<String>(
-                          value: ruta.idRuta.toString(),
-                          child: Text(ruta.nombre),
-                        );
-                      }).toList(),
-                      onChanged: (valor) async {
-                        if (valor != null) {
-                          setState(() => _rutaSeleccionadaId = valor);
-                          await recorridoVM.dibujarRutaDesdeBD(int.parse(valor));
-                        }
-                      },
-                    ),
-                  ),
-                ),
+                child: _buildDropdown(recorridoVM),
               ),
 
-            /// 🟦 Mensaje de modo
-            if (mostrandoMensaje)
-              Positioned(
-                top: 70,
-                left: 40,
-                right: 40,
-                child: AnimatedOpacity(
-                  opacity: mostrandoMensaje ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 500),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
-                    decoration: BoxDecoration(
-                      color: Colors.black87.withOpacity(0.75),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Center(
-                      child: Text(
-                        switchModo
-                            ? "Mostrando Sitios de Taxi"
-                            : "Mostrando Paradas de Rutas",
-                        style: GoogleFonts.plusJakartaSans(
-                          color: Colors.white,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+            // 🟦 Mensaje de modo
+            if (mostrandoMensaje) _buildModoMensaje(),
 
-            /// 🔁 Botón de modo
+            // 🔁 Botón de modo
             Positioned(
               bottom: 24,
               right: 24,
@@ -331,6 +218,7 @@ class _HomeViewState extends State<HomeView> {
                 ),
               ),
             ),
+
             if (recorridoVM.cargando)
               const Center(child: CircularProgressIndicator()),
           ],
@@ -338,4 +226,118 @@ class _HomeViewState extends State<HomeView> {
       ),
     );
   }
+
+  Widget _buildSearchBar() => Container(
+        height: 48,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(999),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.15),
+              blurRadius: 6,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        alignment: Alignment.centerLeft,
+        child: Row(
+          children: [
+            const Icon(Icons.search, color: Colors.grey),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                _textoBusqueda,
+                style: TextStyle(fontSize: 16, color: Colors.grey[700]),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      );
+
+  Widget _buildDropdown(RecorridoViewModel recorridoVM) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.15),
+            blurRadius: 6,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                isExpanded: true,
+                value: recorridoVM.rutasCandidatas.any((ruta) => 
+                        ruta.idRuta.toString() == _rutaSeleccionadaId) ? _rutaSeleccionadaId: null,
+                hint: const Text("Selecciona una ruta cercana"),
+                items: recorridoVM.rutasCandidatas.map((ruta) {
+                  return DropdownMenuItem<String>(
+                    value: ruta.idRuta.toString(),
+                    child: Text(ruta.nombre),
+                  );
+                }).toList(),
+                onChanged: (valor) async {
+                  if (valor != null) {
+                    setState(() => _rutaSeleccionadaId = valor);
+                    await recorridoVM.dibujarRutaDesdeBD(int.parse(valor));
+                  }
+                },
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, color: Colors.redAccent),
+            tooltip: 'Limpiar mapa',
+            onPressed: () {
+              final recorridoVM = context.read<RecorridoViewModel>();
+              recorridoVM.resetearTodo();
+              setState(() {
+                _rutaSeleccionadaId = null;
+                _textoBusqueda = "Buscar";
+                _destinoSeleccionado = null;
+              });
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildModoMensaje() => Positioned(
+        top: 70,
+        left: 40,
+        right: 40,
+        child: AnimatedOpacity(
+          opacity: mostrandoMensaje ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 500),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+            decoration: BoxDecoration(
+              color: Colors.black87.withOpacity(0.75),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Center(
+              child: Text(
+                switchModo
+                    ? "Mostrando Sitios de Taxi"
+                    : "Mostrando Paradas de Rutas",
+                style: GoogleFonts.plusJakartaSans(
+                  color: Colors.white,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
 }
