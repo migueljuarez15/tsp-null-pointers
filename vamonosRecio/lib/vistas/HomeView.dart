@@ -28,6 +28,7 @@ class _HomeViewState extends State<HomeView> {
   LatLng? _ubicacionActual;
   LatLng? _destinoSeleccionado;
   Polyline? _polylineRutaSimulada;
+  bool _trafficEnabled = false; // controla la capa de tráfico en el GoogleMap
 
   List<ParadaModel> _todasParadas = [];
   List<SitioModel> _todosSitios = [];
@@ -198,6 +199,13 @@ class _HomeViewState extends State<HomeView> {
     });
   }
 
+  // Método para alternar entre mapa normal y mapa de tráfico
+  void _toggleTrafficMap() {
+    setState(() {
+      _trafficEnabled = !_trafficEnabled;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final viewModel = Provider.of<HomeViewModel>(context);
@@ -227,6 +235,7 @@ class _HomeViewState extends State<HomeView> {
               myLocationEnabled: true,
               myLocationButtonEnabled: true,
               zoomControlsEnabled: false,
+              trafficEnabled: _trafficEnabled, // 👈 cambia con el botón
             ),
 
             // 🔍 Barra de búsqueda clickeable
@@ -342,6 +351,54 @@ class _HomeViewState extends State<HomeView> {
                   switchModo ? Icons.directions_bus : Icons.local_taxi,
                   color: Colors.white,
                   size: 28,
+                ),
+              ),
+            ),
+
+            //Boton para ver el mapa con trafico
+            Positioned(
+              bottom: 92,
+              right: 24,
+              child: GestureDetector(
+                onTap: _toggleTrafficMap,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
+                  curve: Curves.easeInOut,
+                  padding: const EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    // Borde sutil y sombra para que parezca botón estilo taxi
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(50),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.18),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: CircleAvatar(
+                    radius: 28,
+                    backgroundColor: _trafficEnabled ? Colors.green : Colors.yellow[700],
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 220),
+                      transitionBuilder: (child, anim) =>
+                          ScaleTransition(scale: anim, child: child),
+                      child: _trafficEnabled
+                          ? const Icon(
+                              Icons.traffic,
+                              key: ValueKey('traffic_on'),
+                              color: Colors.white,
+                              size: 28,
+                            )
+                          : const Icon(
+                              Icons.map,
+                              key: ValueKey('map_icon'),
+                              color: Colors.black,
+                              size: 28,
+                            ),
+                    ),
+                  ),
                 ),
               ),
             ),
