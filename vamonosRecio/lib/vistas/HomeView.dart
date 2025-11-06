@@ -117,22 +117,47 @@ class _HomeViewState extends State<HomeView> {
     setState(() => _circulos = visibles);
   }
 
+  // 🔁 Cambio de modo (Ruta <-> Taxi)
   Future<void> _toggleModo() async {
+    final recorridoVM = context.read<RecorridoViewModel>();
+
+    // 🧹 Limpieza total del mapa y estado
+    recorridoVM.resetearTodo();
     setState(() {
+      _rutaSeleccionadaId = null;
+      _textoBusqueda = "Buscar";
+      _destinoSeleccionado = null;
+      _circulos.clear();
       switchModo = !switchModo;
       mostrandoMensaje = true;
     });
+
     await _cargarContenido();
+
     Future.delayed(const Duration(seconds: 3), () {
       if (mounted) setState(() => mostrandoMensaje = false);
     });
   }
 
+  // 📍 Marcar destino o gestionar búsqueda
   void _marcarDestino(LatLng destino) async {
     final recorridoVM = context.read<RecorridoViewModel>();
     setState(() => _destinoSeleccionado = destino);
-    recorridoVM.marcarDestino(destino);
-    await recorridoVM.buscarRutasCercanas(destino);
+
+    if (!switchModo) {
+      // 🚌 Lógica de rutas
+      recorridoVM.marcarDestino(destino);
+      await recorridoVM.buscarRutasCercanas(destino);
+    } else {
+      // 🚕 Lógica modo taxi
+      recorridoVM.resetearTodo();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Modo Taxi activo: mostrando sitios disponibles"),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   @override
@@ -150,10 +175,14 @@ class _HomeViewState extends State<HomeView> {
               onMapCreated: (controller) => mapController = controller,
               onCameraMove: (position) async {
                 _zoomActual = position.zoom;
-                if (!switchModo) await _cargarParadasOptimizado();
+                if (!switchModo) {
+                  await _cargarParadasOptimizado();
+                } else {
+                  await _cargarSitiosOptimizado();
+                }
               },
-              markers: recorridoVM.marcadores,
-              polylines: recorridoVM.polylines,
+              markers: switchModo ? {} : recorridoVM.marcadores,
+              polylines: switchModo ? {} : recorridoVM.polylines,
               circles: _circulos,
               myLocationEnabled: true,
               myLocationButtonEnabled: true,
@@ -173,26 +202,33 @@ class _HomeViewState extends State<HomeView> {
                   );
 
                   if (resultado != null && mapController != null) {
-                    // 🧹 Limpieza total antes de marcar nuevo destino
                     final recorridoVM = context.read<RecorridoViewModel>();
                     recorridoVM.resetearTodo();
 
                     final LatLng destino = resultado['coordenadas'];
                     final String nombre = resultado['nombre'];
+
                     mapController!.animateCamera(
                       CameraUpdate.newLatLngZoom(destino, 15),
                     );
+
+                    setState(() {
+                      _textoBusqueda = nombre;
+                      _rutaSeleccionadaId = null;
+                      _destinoSeleccionado = destino;
+                    });
+
+                    // 🔹 Lógica dependiente del modo
                     _marcarDestino(destino);
-                    setState(() => _textoBusqueda = nombre);
-                    setState(() {_rutaSeleccionadaId = null;});
                   }
                 },
                 child: _buildSearchBar(),
               ),
             ),
 
-            // 🧭 Dropdown de rutas
-            if (_destinoSeleccionado != null &&
+            // 🧭 Dropdown rutas (solo si NO es modo taxi)
+            if (!switchModo &&
+                _destinoSeleccionado != null &&
                 recorridoVM.rutasCandidatas.isNotEmpty)
               Positioned(
                 top: 70,
@@ -201,10 +237,10 @@ class _HomeViewState extends State<HomeView> {
                 child: _buildDropdown(recorridoVM),
               ),
 
-            // 🟦 Mensaje de modo
+            // 🟦 Mensaje de modo actual
             if (mostrandoMensaje) _buildModoMensaje(),
 
-            // 🔁 Botón de modo
+            // 🔁 Botón para cambiar modo
             Positioned(
               bottom: 24,
               right: 24,
@@ -227,6 +263,7 @@ class _HomeViewState extends State<HomeView> {
     );
   }
 
+  // 🔍 Barra de búsqueda visual
   Widget _buildSearchBar() => Container(
         height: 48,
         decoration: BoxDecoration(
@@ -257,6 +294,7 @@ class _HomeViewState extends State<HomeView> {
         ),
       );
 
+  // 🧭 Dropdown con rutas personalizadas
   Widget _buildDropdown(RecorridoViewModel recorridoVM) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -277,13 +315,72 @@ class _HomeViewState extends State<HomeView> {
             child: DropdownButtonHideUnderline(
               child: DropdownButton<String>(
                 isExpanded: true,
-                value: recorridoVM.rutasCandidatas.any((ruta) => 
-                        ruta.idRuta.toString() == _rutaSeleccionadaId) ? _rutaSeleccionadaId: null,
-                hint: const Text("Selecciona una ruta cercana"),
+                value: recorridoVM.rutasCandidatas.any((ruta) =>
+                        ruta.idRuta.toString() == _rutaSeleccionadaId)
+                    ? _rutaSeleccionadaId
+                    : null,
+                hint: const Text("Selecciona una ruta sugerida"),
                 items: recorridoVM.rutasCandidatas.map((ruta) {
+                  Color colorFondo;
+                  switch (ruta.idRuta) {
+                    case 1:
+                      colorFondo = const Color.fromARGB(255, 133, 205, 238);
+                      break;
+                    case 2:
+                      colorFondo = const Color.fromARGB(255, 8, 83, 0);
+                      break;
+                    case 3:
+                      colorFondo = const Color.fromARGB(255, 114, 114, 114);
+                      break;
+                    case 4:
+                      colorFondo = const Color.fromARGB(255, 54, 54, 248);
+                      break;
+                    case 8:
+                      colorFondo = const Color.fromARGB(255, 223, 104, 0);
+                      break;
+                    case 14:
+                      colorFondo = const Color.fromARGB(255, 219, 166, 32);
+                      break;
+                    case 15:
+                      colorFondo = const Color.fromARGB(255, 129, 0, 129);
+                      break;
+                    case 16:
+                      colorFondo = const Color.fromARGB(255, 214, 214, 34);
+                      break;
+                    case 17:
+                      colorFondo = const Color.fromARGB(255, 48, 199, 53);
+                      break;
+                    case 21:
+                      colorFondo = const Color.fromARGB(255, 255, 0, 0);
+                      break;
+                    default:
+                      colorFondo = Colors.grey;
+                  }
+
                   return DropdownMenuItem<String>(
                     value: ruta.idRuta.toString(),
-                    child: Text(ruta.nombre),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 8, horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: colorFondo,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            ruta.nombre,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const Icon(Icons.directions_bus,
+                              size: 18, color: Colors.white),
+                        ],
+                      ),
+                    ),
                   );
                 }).toList(),
                 onChanged: (valor) async {
@@ -296,7 +393,7 @@ class _HomeViewState extends State<HomeView> {
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.close, color: Colors.redAccent),
+            icon: const Icon(Icons.close, color: Colors.black),
             tooltip: 'Limpiar mapa',
             onPressed: () {
               final recorridoVM = context.read<RecorridoViewModel>();
@@ -313,6 +410,7 @@ class _HomeViewState extends State<HomeView> {
     );
   }
 
+  // 🟦 Mensaje de cambio de modo
   Widget _buildModoMensaje() => Positioned(
         top: 70,
         left: 40,

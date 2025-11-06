@@ -26,7 +26,7 @@ class RecorridoViewModel extends ChangeNotifier {
   final Map<int, Color> coloresRutas = {
     1: const Color.fromARGB(255, 133, 205, 238),
     2: const Color.fromARGB(255, 8, 83, 0),
-    3: const Color.fromARGB(255, 170, 170, 170),
+    3: const Color.fromARGB(255, 114, 114, 114),
     4: const Color.fromARGB(255, 54, 54, 248),
     8: const Color.fromARGB(255, 223, 104, 0),
     14: const Color.fromARGB(255, 219, 166, 32),
