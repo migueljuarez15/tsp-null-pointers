@@ -7,6 +7,7 @@ import 'package:vamonos_recio/modelos/ParadaModel.dart';
 import 'package:vamonos_recio/modelos/SitioModel.dart';
 import 'package:vamonos_recio/vistamodelos/HomeViewModel.dart';
 import 'package:vamonos_recio/vistamodelos/RecorridoViewModel.dart';
+import 'package:vamonos_recio/vistamodelos/TraficoViewModel.dart';
 import '../services/DatabaseHelper.dart';
 import '../services/MapService.dart';
 import 'BusquedaView.dart';
@@ -159,10 +160,11 @@ class _HomeViewState extends State<HomeView> {
       );
     }
   }
-
+  
   @override
   Widget build(BuildContext context) {
     final primary = const Color(0xFF137fec);
+    final traficoVM = context.watch<TraficoViewModel>();
     final recorridoVM = context.watch<RecorridoViewModel>();
 
     return Scaffold(
@@ -187,6 +189,7 @@ class _HomeViewState extends State<HomeView> {
               myLocationEnabled: true,
               myLocationButtonEnabled: true,
               zoomControlsEnabled: false,
+              trafficEnabled: traficoVM.trafficEnabled, 
             ),
 
             // 🔍 Barra de búsqueda
@@ -255,6 +258,53 @@ class _HomeViewState extends State<HomeView> {
               ),
             ),
 
+            //Boton para ver el mapa con trafico
+            Positioned(
+              bottom: 92,
+              right: 24,
+              child: GestureDetector(
+                onTap: () => traficoVM.mostrarMapaTrafico(context),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
+                  curve: Curves.easeInOut,
+                  padding: const EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    // Borde sutil y sombra para que parezca botón estilo taxi
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(50),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.18),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: CircleAvatar(
+                    radius: 28,
+                    backgroundColor: traficoVM.trafficEnabled ? Colors.green : Colors.yellow[700],
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 220),
+                      transitionBuilder: (child, anim) =>
+                          ScaleTransition(scale: anim, child: child),
+                      child: traficoVM.trafficEnabled
+                          ? const Icon(
+                              Icons.traffic,
+                              key: ValueKey('traffic_on'),
+                              color: Colors.white,
+                              size: 28,
+                            )
+                          : const Icon(
+                              Icons.map,
+                              key: ValueKey('map_icon'),
+                              color: Colors.black,
+                              size: 28,
+                            ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
             if (recorridoVM.cargando)
               const Center(child: CircularProgressIndicator()),
           ],

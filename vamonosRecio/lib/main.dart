@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:vamonos_recio/vistamodelos/TraficoViewModel.dart';
 import 'vistas/HomeView.dart';
 import 'vistamodelos/RecorridoViewModel.dart';
 import 'vistamodelos/BusquedaViewModel.dart';
@@ -12,6 +13,7 @@ void main() {
         ChangeNotifierProvider(create: (_) => HomeViewModel()),
         ChangeNotifierProvider(create: (_) => RecorridoViewModel()),
         ChangeNotifierProvider(create: (_) => BusquedaViewModel()),
+        ChangeNotifierProvider(create: (_) => TraficoViewModel()),
       ],
       child: const MyApp(),
     ),
