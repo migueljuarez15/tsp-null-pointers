@@ -200,10 +200,35 @@ class _HomeViewState extends State<HomeView> {
   }
 
   // Método para alternar entre mapa normal y mapa de tráfico
-  void _toggleTrafficMap() {
-    setState(() {
-      _trafficEnabled = !_trafficEnabled;
-    });
+  Future<void> _toggleTrafficMap() async {
+    try {
+      setState(() {
+        _trafficEnabled = !_trafficEnabled;
+      });
+
+      bool apiDisponible = true; 
+
+      if (!apiDisponible) {
+        throw Exception('No se pudieron obtener los datos de tráfico.');
+      }
+
+    } catch (e) {
+      // Si la API falla, muestra aviso y desactiva tráfico
+      setState(() {
+        _trafficEnabled = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No se pudo cargar la información del tráfico. Intenta más tarde.',
+          ),
+          backgroundColor: Colors.redAccent,
+          duration: Duration(seconds: 3),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   @override
