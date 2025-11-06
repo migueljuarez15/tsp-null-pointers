@@ -1,103 +1,175 @@
-import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
-import '../modelos/ParadaModel.dart';
-import '../modelos/RutaModel.dart';
-import '../modelos/RecorridoModel.dart';
-import '../services/DatabaseHelper.dart';
-import '../services/OSRMService.dart';
 import 'dart:math';
 
+import 'package:flutter/material.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:vamonos_recio/modelos/RutaModel.dart';
+import '../modelos/ParadaModel.dart';
+import '../services/DatabaseHelper.dart';
+import '../services/OsrmService.dart';
+
 class RecorridoViewModel extends ChangeNotifier {
-  final _db = DatabaseHelper();
+  final DatabaseHelper _db = DatabaseHelper();
 
-  Set<Polyline> polylines = {};
-  Set<Marker> marcadores = {};
-  bool cargando = false;
+  Set<Polyline> _polylines = {};
+  Set<Marker> _marcadores = {};
+  LatLng? _destinoSeleccionado;
+  List<RutaModel> _rutasCandidatas = [];
 
-  /// 🔹 Dibuja la ruta completa (según los registros de BD)
+  Set<Polyline> get polylines => _polylines;
+  Set<Marker> get marcadores => _marcadores;
+  List<RutaModel> get rutasCandidatas => _rutasCandidatas;
+
+  bool _cargando = false;
+  bool get cargando => _cargando;
+
+  /// 📍 Marca el destino en el mapa
+  void marcarDestino(LatLng destino) {
+    _destinoSeleccionado = destino;
+    _marcadores.removeWhere((m) => m.markerId.value == "destino_buscado");
+    _marcadores.add(
+      Marker(
+        markerId: const MarkerId("destino_buscado"),
+        position: destino,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+        infoWindow: const InfoWindow(title: "Destino buscado"),
+      ),
+    );
+    notifyListeners();
+  }
+
+  /// 🚍 Dibuja una ruta completa desde la BD (RECORRIDO)
   Future<void> dibujarRutaDesdeBD(int idRuta) async {
-    cargando = true;
+    _cargando = true;
     notifyListeners();
 
     try {
-      // 1️⃣ Obtener datos base desde la BD
-      final recorridos = await _db.obtenerRecorridos();
-      final paradas = await _db.obtenerParadas();
-      final rutas = await _db.obtenerRutas();
+      // 🔹 Limpia polyline y marcadores anteriores (excepto el destino)
+      _polylines.clear();
+      _marcadores.removeWhere(
+          (m) => m.markerId.value != "destino_buscado"); // limpia todo menos destino
 
-      // 2️⃣ Filtrar los recorridos de esa ruta y ordenarlos
-      final recorridosRuta = recorridos
-          .where((r) => r.idRuta == idRuta)
-          .toList()
-        ..sort((a, b) => a.orden.compareTo(b.orden));
-
-      if (recorridosRuta.isEmpty) {
-        debugPrint("❌ No hay registros de recorrido para la ruta $idRuta.");
+      // 🔹 Consulta las paradas de la ruta ordenadas
+      final List<ParadaModel> paradas = await _db.obtenerParadasPorRuta(idRuta);
+      if (paradas.isEmpty) {
+        debugPrint('⚠️ No se encontraron paradas para la ruta $idRuta');
+        _cargando = false;
+        notifyListeners();
         return;
       }
 
-      final ruta = rutas.firstWhere((r) => r.idRuta == idRuta);
+      // 🔹 Agrega marcadores solo de esa ruta
+      _marcadores.addAll(paradas.map((p) {
+        return Marker(
+          markerId: MarkerId('parada_${p.idParada}'),
+          position: LatLng(p.latitud, p.longitud),
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          infoWindow: InfoWindow(title: p.nombre),
+        );
+      }));
 
-      // 3️⃣ Convertir a lista de paradas ordenadas
-      List<ParadaModel> paradasRuta = [];
-      for (var r in recorridosRuta) {
-        final p = paradas.firstWhere((p) => p.idParada == r.idParada);
-        paradasRuta.add(p);
-      }
+      // 🔹 Construye la polyline completa uniendo cada par de paradas consecutivas
+      List<LatLng> rutaCompleta = [];
+      for (int i = 0; i < paradas.length - 1; i++) {
+        final origen = LatLng(paradas[i].latitud, paradas[i].longitud);
+        final destino = LatLng(paradas[i + 1].latitud, paradas[i + 1].longitud);
+        final segmento = await OSRMService.obtenerRutaOSRM(origen, destino);
 
-      // 4️⃣ Consultar OSRM para cada tramo consecutivo
-      List<LatLng> puntosTotales = [];
-      for (int i = 0; i < paradasRuta.length - 1; i++) {
-        final origen = LatLng(paradasRuta[i].latitud, paradasRuta[i].longitud);
-        final destino = LatLng(paradasRuta[i + 1].latitud, paradasRuta[i + 1].longitud);
-
-        final puntosSegmento = await OSRMService.obtenerRutaOSRM(origen, destino);
-        if (puntosSegmento.isNotEmpty) {
-          puntosTotales.addAll(puntosSegmento);
-        } else {
-          // En caso de fallo en OSRM, se conecta directo
-          puntosTotales.addAll([origen, destino]);
+        if (segmento.isNotEmpty) {
+          if (rutaCompleta.isNotEmpty) segmento.removeAt(0);
+          rutaCompleta.addAll(segmento);
         }
       }
 
-      // 5️⃣ Dibujar la polyline
-      polylines = {
+      if (rutaCompleta.isEmpty) {
+        debugPrint('⚠️ No se pudo construir la polyline para la ruta $idRuta');
+        _cargando = false;
+        notifyListeners();
+        return;
+      }
+
+      // 🔹 Color variable según la ruta
+      final colorRuta = Colors.primaries[idRuta % Colors.primaries.length];
+
+      // 🔹 Agrega la polyline principal al mapa
+      _polylines.add(
         Polyline(
           polylineId: PolylineId('ruta_$idRuta'),
-          points: puntosTotales,
-          color: _colorDesdeHex(ruta.color),
+          points: rutaCompleta,
+          color: colorRuta,
           width: 6,
-        )
-      };
-
-      // 6️⃣ Agregar marcadores para inicio y fin
-      marcadores = {
-        Marker(
-          markerId: const MarkerId('inicio'),
-          position: LatLng(paradasRuta.first.latitud, paradasRuta.first.longitud),
-          infoWindow: InfoWindow(title: "Inicio: ${paradasRuta.first.nombre}"),
         ),
-        Marker(
-          markerId: const MarkerId('fin'),
-          position: LatLng(paradasRuta.last.latitud, paradasRuta.last.longitud),
-          infoWindow: InfoWindow(title: "Fin: ${paradasRuta.last.nombre}"),
-        ),
-      };
+      );
 
-      debugPrint("✅ Ruta ${ruta.nombre} trazada correctamente con ${puntosTotales.length} puntos.");
-
+      notifyListeners();
     } catch (e) {
-      debugPrint("⚠️ Error al dibujar ruta desde BD: $e");
+      debugPrint("❌ Error al dibujar ruta desde BD: $e");
     } finally {
-      cargando = false;
+      _cargando = false;
       notifyListeners();
     }
   }
 
-  /// Utilidad: convertir color HEX de BD a Color Flutter
-  Color _colorDesdeHex(String hexColor) {
-    hexColor = hexColor.replaceAll("#", "");
-    if (hexColor.length == 6) hexColor = "FF$hexColor";
-    return Color(int.parse("0x$hexColor"));
+  /// 🔍 Buscar rutas que pasen cerca del destino (radio dinámico)
+  Future<void> buscarRutasCercanas(LatLng destino) async {
+    try {
+      _cargando = true;
+      notifyListeners();
+
+      double radio = _determinarRadio(destino);
+      final paradasCercanas = await _db.obtenerParadasCercanas(destino, radio);
+
+      if (paradasCercanas.isEmpty) {
+        debugPrint('❌ No hay paradas cercanas al destino');
+        _rutasCandidatas = [];
+        _cargando = false;
+        notifyListeners();
+        return;
+      }
+
+      final idsParadas = paradasCercanas.map((p) => p.idParada!).toList();
+      final rutas = await _db.obtenerRutasPorParadas(idsParadas);
+
+      _rutasCandidatas = rutas;
+      notifyListeners();
+    } catch (e) {
+      debugPrint("⚠️ Error al buscar rutas cercanas: $e");
+    } finally {
+      _cargando = false;
+      notifyListeners();
+    }
+  }
+
+  /// 📏 Radio dinámico según zona (urbana o lejana)
+  double _determinarRadio(LatLng punto) {
+    // Centro Zacatecas aproximado
+    const centro = LatLng(22.7709, -102.5832);
+    final distancia = _distanciaKm(punto, centro);
+
+    if (distancia < 3.0) return 250; // zona centro
+    if (distancia < 7.0) return 400; // semiurbana
+    return 700; // zona lejana (Campus, etc.)
+  }
+
+  double _distanciaKm(LatLng a, LatLng b) {
+    const R = 6371;
+    final dLat = _deg2rad(b.latitude - a.latitude);
+    final dLon = _deg2rad(b.longitude - a.longitude);
+    final lat1 = _deg2rad(a.latitude);
+    final lat2 = _deg2rad(b.latitude);
+    final aHarv = (sin(dLat / 2) * sin(dLat / 2)) +
+        cos(lat1) * cos(lat2) * (sin(dLon / 2) * sin(dLon / 2));
+    final c = 2 * atan2(sqrt(aHarv), sqrt(1 - aHarv));
+    return R * c;
+  }
+
+  double _deg2rad(double deg) => deg * (pi / 180);
+
+  /// 🔁 Limpia todo del mapa
+  void limpiarMapa() {
+    _polylines.clear();
+    _marcadores.clear();
+    _rutasCandidatas.clear();
+    _destinoSeleccionado = null;
+    notifyListeners();
   }
 }

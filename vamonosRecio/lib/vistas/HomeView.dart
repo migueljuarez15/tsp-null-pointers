@@ -19,6 +19,7 @@ class HomeView extends StatefulWidget {
 }
 
 String _textoBusqueda = "Buscar";
+String? _rutaSeleccionadaId;
 
 class _HomeViewState extends State<HomeView> {
   GoogleMapController? mapController;
@@ -27,14 +28,10 @@ class _HomeViewState extends State<HomeView> {
   double _zoomActual = 13;
   LatLng? _ubicacionActual;
   LatLng? _destinoSeleccionado;
-  Polyline? _polylineRutaSimulada;
 
   List<ParadaModel> _todasParadas = [];
   List<SitioModel> _todosSitios = [];
-
-  Set<Polyline> _rutas = {};
   Set<Circle> _circulos = {};
-  Set<Marker> _markers = {}; // 👈 Añadido: para el destino buscado
 
   final _db = DatabaseHelper();
 
@@ -47,7 +44,6 @@ class _HomeViewState extends State<HomeView> {
     });
   }
 
-  /// 🔹 Carga contenido según modo actual
   Future<void> _cargarContenido() async {
     if (switchModo) {
       await _cargarSitiosOptimizado();
@@ -56,11 +52,9 @@ class _HomeViewState extends State<HomeView> {
     }
   }
 
-  /// 🚌 Carga paradas reales desde BD y filtra según zoom
   Future<void> _cargarParadasOptimizado() async {
     final db = DatabaseHelper();
     _todasParadas = await db.obtenerParadas();
-
     Set<Circle> visibles = {};
 
     int step;
@@ -97,11 +91,9 @@ class _HomeViewState extends State<HomeView> {
     setState(() => _circulos = visibles);
   }
 
-  /// 🚕 Carga sitios reales desde BD y filtra según zoom
   Future<void> _cargarSitiosOptimizado() async {
     final db = DatabaseHelper();
     _todosSitios = await db.obtenerSitios();
-
     Set<Circle> visibles = {};
 
     int step;
@@ -138,7 +130,6 @@ class _HomeViewState extends State<HomeView> {
     setState(() => _circulos = visibles);
   }
 
-  /// 🔁 Alterna entre modo camión y paradas
   Future<void> _toggleModo() async {
     setState(() {
       switchModo = !switchModo;
@@ -150,59 +141,19 @@ class _HomeViewState extends State<HomeView> {
     });
   }
 
-  /// 📍 Agrega marcador del destino buscado
+  /// 📍 Marca el destino y lo comunica al ViewModel
   void _marcarDestino(LatLng destino) async {
-    setState(() {
-      _destinoSeleccionado = destino;
-      _markers.clear();
-      _markers.add(
-        Marker(
-          markerId: const MarkerId("destino_buscado"),
-          position: destino,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-          infoWindow: const InfoWindow(title: "Destino"),
-        ),
-      );
-    });
-
-    // 🔹 Simulamos ubicación actual del usuario (por ahora un punto fijo)
-    _ubicacionActual ??= const LatLng(22.7700, -102.5720);
-
-    // 🔹 Si estamos en modo camión, dibujamos la Polyline simulada
-    if (!switchModo) {
-      _dibujarRutaSimulada(_ubicacionActual!, destino);
-    }
-  }
-
-  void _dibujarRutaSimulada(LatLng inicio, LatLng destino) {
-    // 🔸 Simulamos una "ruta" con puntos intermedios
-    final List<LatLng> puntos = [
-      inicio,
-      LatLng(
-        (inicio.latitude + destino.latitude) / 2 + 0.002, 
-        (inicio.longitude + destino.longitude) / 2 - 0.002,
-      ),
-      destino,
-    ];
-
-    setState(() {
-      _rutas.clear();
-      _rutas.add(
-        Polyline(
-          polylineId: const PolylineId("ruta_simulada"),
-          points: puntos,
-          color: Colors.blueAccent,
-          width: 5,
-        ),
-      );
-    });
+    final recorridoVM = context.read<RecorridoViewModel>();
+    setState(() => _destinoSeleccionado = destino);
+    recorridoVM.marcarDestino(destino);
+    // 🔹 Aquí está la clave: buscar rutas cercanas al destino
+    await recorridoVM.buscarRutasCercanas(destino);
   }
 
   @override
   Widget build(BuildContext context) {
-    final viewModel = Provider.of<HomeViewModel>(context);
-    final recorridoVM = context.read<RecorridoViewModel>();
     final primary = const Color(0xFF137fec);
+    final recorridoVM = context.watch<RecorridoViewModel>();
 
     return Scaffold(
       body: SafeArea(
@@ -216,20 +167,17 @@ class _HomeViewState extends State<HomeView> {
               onMapCreated: (controller) => mapController = controller,
               onCameraMove: (position) async {
                 _zoomActual = position.zoom;
-                if (!switchModo) {
-                  await _cargarParadasOptimizado();
-                }
+                if (!switchModo) await _cargarParadasOptimizado();
               },
               markers: recorridoVM.marcadores,
               polylines: recorridoVM.polylines,
               circles: _circulos,
-              //markers: _markers.union(viewModel.marcadores), // 👈 marcador del destino
               myLocationEnabled: true,
               myLocationButtonEnabled: true,
               zoomControlsEnabled: false,
             ),
 
-            // 🔍 Barra de búsqueda clickeable
+            /// 🔍 Barra de búsqueda
             Positioned(
               top: 12,
               left: 12,
@@ -249,15 +197,13 @@ class _HomeViewState extends State<HomeView> {
                       CameraUpdate.newLatLngZoom(destino, 15),
                     );
 
-                    // ✅ AQUI se usa el método que faltaba
                     _marcarDestino(destino);
 
-                    // 👇 Llama al ViewModel (solo si estás en modo camión)
-                    if (!switchModo) {
-                      await recorridoVM.dibujarRutaDesdeBD(1); // ← ID de la ruta seleccionada
-                    }
+                    // ⚙️ Solo si estamos en modo camión, dibuja la ruta completa
+                    /*if (!switchModo) {
+                      await recorridoVM.dibujarRutaDesdeBD(1);
+                    }*/
 
-                    // 🔹 Actualiza el texto de la barra de búsqueda
                     setState(() {
                       _textoBusqueda = nombre;
                     });
@@ -289,9 +235,9 @@ class _HomeViewState extends State<HomeView> {
                             fontSize: 16,
                             color: Colors.grey[700],
                           ),
-                          overflow: TextOverflow.ellipsis, // 🔹 recorta con “...”
-                          maxLines: 1,                     // 🔹 evita salto de línea
-                          softWrap: false,                 // 🔹 mantiene en una sola línea
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                          softWrap: false,
                         ),
                       ),
                     ],
@@ -300,7 +246,48 @@ class _HomeViewState extends State<HomeView> {
               ),
             ),
 
-            // 🟦 Mensaje temporal de modo
+            /// 🧭 Dropdown de rutas cercanas
+            if (_destinoSeleccionado != null && recorridoVM.rutasCandidatas.isNotEmpty)
+              Positioned(
+                top: 70,
+                left: 12,
+                right: 12,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.15),
+                        blurRadius: 6,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      isExpanded: true,
+                      value: _rutaSeleccionadaId,
+                      hint: const Text("Selecciona una ruta cercana"),
+                      items: recorridoVM.rutasCandidatas.map((ruta) {
+                        return DropdownMenuItem<String>(
+                          value: ruta.idRuta.toString(),
+                          child: Text(ruta.nombre),
+                        );
+                      }).toList(),
+                      onChanged: (valor) async {
+                        if (valor != null) {
+                          setState(() => _rutaSeleccionadaId = valor);
+                          await recorridoVM.dibujarRutaDesdeBD(int.parse(valor));
+                        }
+                      },
+                    ),
+                  ),
+                ),
+              ),
+
+            /// 🟦 Mensaje de modo
             if (mostrandoMensaje)
               Positioned(
                 top: 70,
@@ -310,8 +297,7 @@ class _HomeViewState extends State<HomeView> {
                   opacity: mostrandoMensaje ? 1.0 : 0.0,
                   duration: const Duration(milliseconds: 500),
                   child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
                     decoration: BoxDecoration(
                       color: Colors.black87.withOpacity(0.75),
                       borderRadius: BorderRadius.circular(12),
@@ -331,7 +317,7 @@ class _HomeViewState extends State<HomeView> {
                 ),
               ),
 
-            // 🔁 Botón toggle modo
+            /// 🔁 Botón de modo
             Positioned(
               bottom: 24,
               right: 24,
@@ -345,6 +331,8 @@ class _HomeViewState extends State<HomeView> {
                 ),
               ),
             ),
+            if (recorridoVM.cargando)
+              const Center(child: CircularProgressIndicator()),
           ],
         ),
       ),
