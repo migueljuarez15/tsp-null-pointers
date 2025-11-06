@@ -106,18 +106,23 @@ class SitioViewModel extends ChangeNotifier {
 
         _polylines.add(Polyline(
           polylineId: const PolylineId("taxiRoute"),
-          color: const Color.fromARGB(255, 255, 58, 58),
+          color: const Color.fromARGB(255, 255, 96, 96),
           width: 6,
           points: polylineCoords,
         ));
 
         // 🟢 Marcadores
-        _markers.add(Marker(
-          markerId: const MarkerId("origen"),
-          position: origen,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-          infoWindow: const InfoWindow(title: "Sitio de Taxi más cercano"),
-        ));
+        if (_sitioMasCercano != null) {
+          _markers.add(Marker(
+            markerId: const MarkerId("sitioMasCercano"),
+            position: LatLng(_sitioMasCercano!.latitud, _sitioMasCercano!.longitud),
+            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+            infoWindow: InfoWindow(
+              title: _sitioMasCercano!.nombre,
+              snippet: "Sitio más cercano",
+            ),
+          ));
+        }
 
         _markers.add(Marker(
           markerId: const MarkerId("destino"),

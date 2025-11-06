@@ -7,6 +7,7 @@ import 'package:vamonos_recio/modelos/ParadaModel.dart';
 import 'package:vamonos_recio/modelos/SitioModel.dart';
 import 'package:vamonos_recio/vistamodelos/HomeViewModel.dart';
 import 'package:vamonos_recio/vistamodelos/RecorridoViewModel.dart';
+import 'package:vamonos_recio/vistamodelos/SitioViewModel.dart';
 import '../services/DatabaseHelper.dart';
 import '../services/MapService.dart';
 import 'BusquedaView.dart';
@@ -34,7 +35,7 @@ class _HomeViewState extends State<HomeView> {
 
   Set<Polyline> _rutas = {};
   Set<Circle> _circulos = {};
-  Set<Marker> _markers = {}; // 👈 Añadido: para el destino buscado
+  Set<Marker> _markers = {};
 
   final _db = DatabaseHelper();
 
@@ -47,22 +48,18 @@ class _HomeViewState extends State<HomeView> {
     });
   }
 
-  /// 🔹 Carga contenido según modo actual
   Future<void> _cargarContenido() async {
     if (switchModo) {
-      await _mostrarSitioMasCercano();
+      await _cargarSitiosOptimizado();
     } else {
       await _cargarParadasOptimizado();
     }
   }
 
-  /// 🚌 Carga paradas reales desde BD y filtra según zoom
   Future<void> _cargarParadasOptimizado() async {
-    final db = DatabaseHelper();
-    _todasParadas = await db.obtenerParadas();
+    _todasParadas = await _db.obtenerParadas();
 
     Set<Circle> visibles = {};
-
     int step;
     if (_zoomActual < 11) {
       step = 25;
@@ -85,11 +82,8 @@ class _HomeViewState extends State<HomeView> {
           strokeColor: Colors.blueAccent,
           strokeWidth: 1,
           consumeTapEvents: true,
-          onTap: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(p.nombre)),
-            );
-          },
+          onTap: () => ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(p.nombre))),
         ),
       );
     }
@@ -97,13 +91,10 @@ class _HomeViewState extends State<HomeView> {
     setState(() => _circulos = visibles);
   }
 
-  /// 🚕 Carga sitios reales desde BD y filtra según zoom
   Future<void> _cargarSitiosOptimizado() async {
-    final db = DatabaseHelper();
-    _todosSitios = await db.obtenerSitios();
+    _todosSitios = await _db.obtenerSitios();
 
     Set<Circle> visibles = {};
-
     int step;
     if (_zoomActual < 11) {
       step = 25;
@@ -126,11 +117,8 @@ class _HomeViewState extends State<HomeView> {
           strokeColor: const Color.fromARGB(255, 255, 44, 44),
           strokeWidth: 1,
           consumeTapEvents: true,
-          onTap: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(s.nombre)),
-            );
-          },
+          onTap: () => ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(s.nombre))),
         ),
       );
     }
@@ -138,144 +126,83 @@ class _HomeViewState extends State<HomeView> {
     setState(() => _circulos = visibles);
   }
 
-  /// 🔁 Alterna entre modo camión y paradas
   Future<void> _toggleModo() async {
+    final sitioVM = context.read<SitioViewModel>();
+    sitioVM.limpiarMapaTaxi();
+
     setState(() {
       switchModo = !switchModo;
+      _rutas.clear();
+      _markers.clear();
+      _circulos.clear();
       mostrandoMensaje = true;
+      _textoBusqueda = "Buscar";
     });
+
     await _cargarContenido();
+
     Future.delayed(const Duration(seconds: 3), () {
       if (mounted) setState(() => mostrandoMensaje = false);
     });
   }
 
-  /// 📍 Agrega marcador del destino buscado
-Future<void> _marcarDestino(LatLng destino) async {
-  _ubicacionActual ??= const LatLng(22.7700, -102.5720);
+  Future<void> _marcarDestino(LatLng destino) async {
+    _ubicacionActual ??= const LatLng(22.7700, -102.5720);
+    final sitioVM = context.read<SitioViewModel>();
 
-  setState(() {
-    _destinoSeleccionado = destino;
-
-    // 🔹 Limpiamos solo rutas, no los marcadores todavía
-    _rutas.clear();
-
-    // 🔹 Agregamos el marcador del destino (rojo)
-    _markers.removeWhere((m) => m.markerId.value == "destino_buscado");
-    _markers.add(
-      Marker(
-        markerId: const MarkerId("destino_buscado"),
-        position: destino,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-        infoWindow: const InfoWindow(title: "Destino seleccionado"),
-      ),
-    );
-  });
-
-  if (switchModo) {
-    // 🚕 Si estamos en modo taxis, también mostrar el sitio más cercano
-    await _mostrarSitioMasCercano(agregarMarcador: true);
-  } else {
-    // 🚌 Si es modo camión, dibujar la ruta simulada
-    _dibujarRutaSimulada(_ubicacionActual!, destino);
-  }
-}
-
-/// 🚖 Muestra el sitio más cercano (opcionalmente agregando marcador)
-Future<void> _mostrarSitioMasCercano({bool agregarMarcador = false}) async {
-  final viewModel = context.read<HomeViewModel>();
-
-  await viewModel.inicializarMapa();
-  final sitio = await viewModel.obtenerSitioMasCercano();
-
-  if (sitio != null && viewModel.ubicacionActual != null) {
-    if (agregarMarcador) {
-      // 👇 NO limpiar los marcadores, solo actualizar o añadir el del sitio
-      setState(() {
-        _markers.removeWhere((m) => m.markerId.value == "sitio_cercano");
-        _markers.add(
-          Marker(
-            markerId: const MarkerId('sitio_cercano'),
-            position: LatLng(sitio.latitud, sitio.longitud),
-            infoWindow: InfoWindow(
-              title: sitio.nombre,
-              snippet: 'Sitio más cercano',
-            ),
-            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-          ),
-        );
-      });
-    } else {
-      // Versión original si se llama desde el cambio de modo
-      setState(() {
-        _markers.clear();
-        _markers.add(
-          Marker(
-            markerId: const MarkerId('sitio_cercano'),
-            position: LatLng(sitio.latitud, sitio.longitud),
-            infoWindow: InfoWindow(
-              title: sitio.nombre,
-              snippet: 'Sitio más cercano',
-            ),
-            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-          ),
-        );
-      });
-    }
-
-    // 🔹 Centra el mapa entre el destino y el sitio más cercano si ambos existen
-    if (_destinoSeleccionado != null) {
-      final bounds = LatLngBounds(
-        southwest: LatLng(
-          min(_destinoSeleccionado!.latitude, sitio.latitud),
-          min(_destinoSeleccionado!.longitude, sitio.longitud),
-        ),
-        northeast: LatLng(
-          max(_destinoSeleccionado!.latitude, sitio.latitud),
-          max(_destinoSeleccionado!.longitude, sitio.longitud),
+    setState(() {
+      _destinoSeleccionado = destino;
+      _rutas.clear();
+      _markers.removeWhere((m) => m.markerId.value == "destino_buscado");
+      _markers.add(
+        Marker(
+          markerId: const MarkerId("destino_buscado"),
+          position: destino,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+          infoWindow: const InfoWindow(title: "Destino seleccionado"),
         ),
       );
-      mapController?.animateCamera(CameraUpdate.newLatLngBounds(bounds, 60));
+    });
+
+    if (switchModo) {
+      final sitioVM = context.read<SitioViewModel>();
+      await sitioVM.cargarSitios();
+      final sitio = await sitioVM.obtenerSitioMasCercano(_ubicacionActual!);
+      if (sitio != null) {
+        await sitioVM.calcularRutaTaxi(
+          origen: LatLng(sitio.latitud, sitio.longitud),
+          destino: destino,
+          apiKey: 'AIzaSyDkcaTrFPn2PafDX85VmT-XEKS2qnk7oe8',
+        );
+      }
     } else {
-      // Si no hay destino, centramos solo en el sitio
-      mapController?.animateCamera(
-        CameraUpdate.newLatLngZoom(
-          LatLng(sitio.latitud, sitio.longitud),
-          15,
-        ),
-      );
+      _dibujarRutaSimulada(_ubicacionActual!, destino);
     }
   }
-}
 
   void _dibujarRutaSimulada(LatLng inicio, LatLng destino) {
-    // 🔸 Simulamos una "ruta" con puntos intermedios
-    final List<LatLng> puntos = [
+    final puntos = [
       inicio,
-      LatLng(
-        (inicio.latitude + destino.latitude) / 2 + 0.002, 
-        (inicio.longitude + destino.longitude) / 2 - 0.002,
-      ),
+      LatLng((inicio.latitude + destino.latitude) / 2 + 0.002,
+          (inicio.longitude + destino.longitude) / 2 - 0.002),
       destino,
     ];
 
     setState(() {
       _rutas.clear();
-      _rutas.add(
-        Polyline(
-          polylineId: const PolylineId("ruta_simulada"),
-          points: puntos,
-          color: Colors.blueAccent,
-          width: 5,
-        ),
-      );
+      _rutas.add(Polyline(
+        polylineId: const PolylineId("ruta_simulada"),
+        points: puntos,
+        color: Colors.blueAccent,
+        width: 5,
+      ));
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final viewModel = Provider.of<HomeViewModel>(context);
     final recorridoVM = context.read<RecorridoViewModel>();
+    final sitioVM = context.watch<SitioViewModel>();
     final primary = const Color(0xFF137fec);
 
     return Scaffold(
@@ -292,19 +219,19 @@ Future<void> _mostrarSitioMasCercano({bool agregarMarcador = false}) async {
                 _zoomActual = position.zoom;
                 if (!switchModo) {
                   await _cargarParadasOptimizado();
+                } else {
+                  await _cargarSitiosOptimizado();
                 }
               },
-              markers: _markers,
-              //markers: recorridoVM.marcadores, los comente por que no son relevantes para los taxis
-              //polylines: recorridoVM.polylines,
+              markers: switchModo ? sitioVM.markers : _markers,
+              polylines: switchModo ? sitioVM.polylines : _rutas,
               circles: _circulos,
-              //markers: _markers.union(viewModel.marcadores), // 👈 marcador del destino
               myLocationEnabled: true,
               myLocationButtonEnabled: true,
               zoomControlsEnabled: false,
             ),
 
-            // 🔍 Barra de búsqueda clickeable
+            // 🔍 Barra de búsqueda
             Positioned(
               top: 12,
               left: 12,
@@ -324,18 +251,13 @@ Future<void> _mostrarSitioMasCercano({bool agregarMarcador = false}) async {
                       CameraUpdate.newLatLngZoom(destino, 15),
                     );
 
-                    // ✅ AQUI se usa el método que faltaba
                     _marcarDestino(destino);
 
-                    // 👇 Llama al ViewModel (solo si estás en modo camión)
                     if (!switchModo) {
-                      await recorridoVM.dibujarRutaDesdeBD(1); // ← ID de la ruta seleccionada
+                      await recorridoVM.dibujarRutaDesdeBD(1);
                     }
 
-                    // 🔹 Actualiza el texto de la barra de búsqueda
-                    setState(() {
-                      _textoBusqueda = nombre;
-                    });
+                    setState(() => _textoBusqueda = nombre);
                   }
                 },
                 child: Container(
@@ -364,9 +286,9 @@ Future<void> _mostrarSitioMasCercano({bool agregarMarcador = false}) async {
                             fontSize: 16,
                             color: Colors.grey[700],
                           ),
-                          overflow: TextOverflow.ellipsis, // 🔹 recorta con “...”
-                          maxLines: 1,                     // 🔹 evita salto de línea
-                          softWrap: false,                 // 🔹 mantiene en una sola línea
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                          softWrap: false,
                         ),
                       ),
                     ],
@@ -375,18 +297,24 @@ Future<void> _mostrarSitioMasCercano({bool agregarMarcador = false}) async {
               ),
             ),
 
-            // 🟦 Mensaje temporal de modo
+            // 🚖 Popup del taxi
+            if (switchModo) const Positioned(
+              top: 70,
+              left: 12,
+              right: 12,
+              child: TaxiInfoDropdown(),
+            ),
+
             if (mostrandoMensaje)
               Positioned(
-                top: 70,
+                top: 130,
                 left: 40,
                 right: 40,
                 child: AnimatedOpacity(
                   opacity: mostrandoMensaje ? 1.0 : 0.0,
                   duration: const Duration(milliseconds: 500),
                   child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
                     decoration: BoxDecoration(
                       color: Colors.black87.withOpacity(0.75),
                       borderRadius: BorderRadius.circular(12),
@@ -394,8 +322,8 @@ Future<void> _mostrarSitioMasCercano({bool agregarMarcador = false}) async {
                     child: Center(
                       child: Text(
                         switchModo
-                            ? "Mostrando Sitios de Taxi"
-                            : "Mostrando Paradas de Rutas",
+                            ? "Modo Taxi - Sitios Cercanos"
+                            : "Modo Transporte Público",
                         style: GoogleFonts.plusJakartaSans(
                           color: Colors.white,
                           fontSize: 14,
@@ -406,7 +334,6 @@ Future<void> _mostrarSitioMasCercano({bool agregarMarcador = false}) async {
                 ),
               ),
 
-            // 🔁 Botón toggle modo
             Positioned(
               bottom: 24,
               right: 24,
@@ -425,8 +352,132 @@ Future<void> _mostrarSitioMasCercano({bool agregarMarcador = false}) async {
       ),
     );
   }
+}
 
-  //Taxis
- 
+// 🔹 Nuevo Widget del popup
+class TaxiInfoDropdown extends StatefulWidget {
+  const TaxiInfoDropdown({super.key});
 
+  @override
+  State<TaxiInfoDropdown> createState() => _TaxiInfoDropdownState();
+}
+
+class _TaxiInfoDropdownState extends State<TaxiInfoDropdown> {
+  bool _expandido = true;
+
+  @override
+  Widget build(BuildContext context) {
+    final sitioVM = context.watch<SitioViewModel>();
+    final sitio = sitioVM.sitioMasCercano?.nombre ?? "N/A";
+    final tiempo = sitioVM.tiempoEstimado ?? "—";
+    final distancia = sitioVM.distanciaAprox ?? "—";
+
+    if (sitioVM.tiempoEstimado == null && sitioVM.distanciaAprox == null) {
+      return const SizedBox.shrink();
+    }
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: _expandido
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 🔹 Encabezado principal
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: const [
+                        Icon(Icons.local_taxi, color: Color.fromARGB(255, 0, 0, 0)),
+                        SizedBox(width: 8),
+                        Text(
+                          "Trayecto de Taxi",
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        IconButton(
+                          onPressed: () => setState(() => _expandido = false),
+                          icon: const Icon(Icons.keyboard_arrow_up),
+                        ),
+                        IconButton(
+                          onPressed: () {
+                            final sitioVM = context.read<SitioViewModel>();
+                            sitioVM.limpiarMapaTaxi();
+                          },
+                          icon: const Icon(Icons.close, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 10),
+                _buildInfoRow("Sitio más cercano:", sitio),
+                _buildInfoRow("Tiempo estimado:", tiempo),
+                _buildInfoRow("Distancia:", distancia),
+              ],
+            )
+          : Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                // 🔹 Parte izquierda (etiqueta + icono)
+                InkWell(
+                  onTap: () => setState(() => _expandido = true),
+                  child: Row(
+                    children: const [
+                      Icon(Icons.local_taxi, color: Color.fromARGB(255, 0, 0, 0)),
+                      SizedBox(width: 8),
+                      Text(
+                        "Trayecto de Taxi",
+                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
+                      ),
+                      SizedBox(width: 4),
+                      Icon(Icons.keyboard_arrow_down, color: Colors.grey),
+                    ],
+                  ),
+                ),
+
+                // 🔹 Parte derecha (botón de cerrar SIEMPRE visible)
+                IconButton(
+                  onPressed: () {
+                    final sitioVM = context.read<SitioViewModel>();
+                    sitioVM.limpiarMapaTaxi();
+                  },
+                  icon: const Icon(Icons.close, color: Colors.grey),
+                ),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+          Text(value),
+        ],
+      ),
+    );
+  }
 }
