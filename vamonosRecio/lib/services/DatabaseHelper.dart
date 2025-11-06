@@ -1,6 +1,8 @@
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/services.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../modelos/ParadaModel.dart';
@@ -64,6 +66,59 @@ class DatabaseHelper {
       print('❌ Error en obtenerParadas(): $e');
       return [];
     }
+  }
+
+  Future<List<ParadaModel>> obtenerParadasCercanas(LatLng destino, double radioMetros) async {
+    final db = await database;
+    final results = await db.query('PARADAS');
+    final paradas = results.map((e) => ParadaModel.fromMap(e)).toList();
+
+    const double R = 6371000; // Radio terrestre en metros
+    List<ParadaModel> cercanas = [];
+
+    for (var p in paradas) {
+      final dLat = (destino.latitude - p.latitud) * (3.141592653589793 / 180);
+      final dLon = (destino.longitude - p.longitud) * (3.141592653589793 / 180);
+      final a = (sin(dLat / 2) * sin(dLat / 2)) +
+        cos(p.latitud * (3.141592653589793 / 180)) *
+            cos(destino.latitude * (3.141592653589793 / 180)) *
+            (sin(dLon / 2) * sin(dLon / 2));
+      final c = 2 * atan2(sqrt(a), sqrt(1 - a));
+      final distancia = R * c;
+
+      if (distancia <= radioMetros) cercanas.add(p);
+    }
+
+    return cercanas;
+  }
+
+  Future<List<RutaModel>> obtenerRutasPorParadas(List<int> idsParadas) async {
+    if (idsParadas.isEmpty) return [];
+
+    final db = await database;
+    final idList = idsParadas.join(',');
+
+    final results = await db.rawQuery('''
+      SELECT DISTINCT R.*
+      FROM RUTA R
+      INNER JOIN RECORRIDO RC ON R.ID_RUTA = RC.ID_RUTA
+      WHERE RC.ID_PARADA IN ($idList)
+    ''');
+
+    return results.map((e) => RutaModel.fromMap(e)).toList();
+  }
+
+  Future<List<ParadaModel>> obtenerParadasPorRuta(int idRuta) async {
+    final db = await database;
+    final List<Map<String, dynamic>> result = await db.rawQuery('''
+      SELECT P.ID_PARADA, P.NOMBRE, P.LATITUD, P.LONGITUD
+      FROM RECORRIDO R
+      INNER JOIN PARADAS P ON R.ID_PARADA = P.ID_PARADA
+      WHERE R.ID_RUTA = ?
+      ORDER BY R.ORDEN ASC
+    ''', [idRuta]);
+
+    return result.map((e) => ParadaModel.fromMap(e)).toList();
   }
 
   Future<List<RutaModel>> obtenerRutas() async {
