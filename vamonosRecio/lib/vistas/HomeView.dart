@@ -7,6 +7,7 @@ import 'package:vamonos_recio/modelos/ParadaModel.dart';
 import 'package:vamonos_recio/modelos/SitioModel.dart';
 import 'package:vamonos_recio/vistamodelos/HomeViewModel.dart';
 import 'package:vamonos_recio/vistamodelos/RecorridoViewModel.dart';
+import 'package:vamonos_recio/vistamodelos/TraficoViewModel.dart';
 import '../services/DatabaseHelper.dart';
 import '../services/MapService.dart';
 import 'BusquedaView.dart';
@@ -28,7 +29,6 @@ class _HomeViewState extends State<HomeView> {
   LatLng? _ubicacionActual;
   LatLng? _destinoSeleccionado;
   Polyline? _polylineRutaSimulada;
-  bool _trafficEnabled = false; // controla la capa de tráfico en el GoogleMap
 
   List<ParadaModel> _todasParadas = [];
   List<SitioModel> _todosSitios = [];
@@ -198,44 +198,13 @@ class _HomeViewState extends State<HomeView> {
       );
     });
   }
-
-  // Método para alternar entre mapa normal y mapa de tráfico
-  Future<void> _toggleTrafficMap() async {
-    try {
-      setState(() {
-        _trafficEnabled = !_trafficEnabled;
-      });
-
-      bool apiDisponible = true; 
-
-      if (!apiDisponible) {
-        throw Exception('No se pudieron obtener los datos de tráfico.');
-      }
-
-    } catch (e) {
-      // Si la API falla, muestra aviso y desactiva tráfico
-      setState(() {
-        _trafficEnabled = false;
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'No se pudo cargar la información del tráfico. Intenta más tarde.',
-          ),
-          backgroundColor: Colors.redAccent,
-          duration: Duration(seconds: 3),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
-  }
-
+  
   @override
   Widget build(BuildContext context) {
     final viewModel = Provider.of<HomeViewModel>(context);
     final recorridoVM = context.read<RecorridoViewModel>();
     final primary = const Color(0xFF137fec);
+    final traficoVM = context.watch<TraficoViewModel>();
 
     return Scaffold(
       body: SafeArea(
@@ -260,7 +229,7 @@ class _HomeViewState extends State<HomeView> {
               myLocationEnabled: true,
               myLocationButtonEnabled: true,
               zoomControlsEnabled: false,
-              trafficEnabled: _trafficEnabled, // 👈 cambia con el botón
+              trafficEnabled: traficoVM.trafficEnabled, 
             ),
 
             // 🔍 Barra de búsqueda clickeable
@@ -385,7 +354,7 @@ class _HomeViewState extends State<HomeView> {
               bottom: 92,
               right: 24,
               child: GestureDetector(
-                onTap: _toggleTrafficMap,
+                onTap: () => traficoVM.mostrarMapaTrafico(context),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 250),
                   curve: Curves.easeInOut,
@@ -404,12 +373,12 @@ class _HomeViewState extends State<HomeView> {
                   ),
                   child: CircleAvatar(
                     radius: 28,
-                    backgroundColor: _trafficEnabled ? Colors.green : Colors.yellow[700],
+                    backgroundColor: traficoVM.trafficEnabled ? Colors.green : Colors.yellow[700],
                     child: AnimatedSwitcher(
                       duration: const Duration(milliseconds: 220),
                       transitionBuilder: (child, anim) =>
                           ScaleTransition(scale: anim, child: child),
-                      child: _trafficEnabled
+                      child: traficoVM.trafficEnabled
                           ? const Icon(
                               Icons.traffic,
                               key: ValueKey('traffic_on'),
