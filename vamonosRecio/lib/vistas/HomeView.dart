@@ -50,7 +50,7 @@ class _HomeViewState extends State<HomeView> {
   /// 🔹 Carga contenido según modo actual
   Future<void> _cargarContenido() async {
     if (switchModo) {
-      await _cargarSitiosOptimizado();
+      await _mostrarSitioMasCercano();
     } else {
       await _cargarParadasOptimizado();
     }
@@ -151,28 +151,102 @@ class _HomeViewState extends State<HomeView> {
   }
 
   /// 📍 Agrega marcador del destino buscado
-  void _marcarDestino(LatLng destino) async {
-    setState(() {
-      _destinoSeleccionado = destino;
-      _markers.clear();
-      _markers.add(
-        Marker(
-          markerId: const MarkerId("destino_buscado"),
-          position: destino,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-          infoWindow: const InfoWindow(title: "Destino"),
+Future<void> _marcarDestino(LatLng destino) async {
+  _ubicacionActual ??= const LatLng(22.7700, -102.5720);
+
+  setState(() {
+    _destinoSeleccionado = destino;
+
+    // 🔹 Limpiamos solo rutas, no los marcadores todavía
+    _rutas.clear();
+
+    // 🔹 Agregamos el marcador del destino (rojo)
+    _markers.removeWhere((m) => m.markerId.value == "destino_buscado");
+    _markers.add(
+      Marker(
+        markerId: const MarkerId("destino_buscado"),
+        position: destino,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+        infoWindow: const InfoWindow(title: "Destino seleccionado"),
+      ),
+    );
+  });
+
+  if (switchModo) {
+    // 🚕 Si estamos en modo taxis, también mostrar el sitio más cercano
+    await _mostrarSitioMasCercano(agregarMarcador: true);
+  } else {
+    // 🚌 Si es modo camión, dibujar la ruta simulada
+    _dibujarRutaSimulada(_ubicacionActual!, destino);
+  }
+}
+
+/// 🚖 Muestra el sitio más cercano (opcionalmente agregando marcador)
+Future<void> _mostrarSitioMasCercano({bool agregarMarcador = false}) async {
+  final viewModel = context.read<HomeViewModel>();
+
+  await viewModel.inicializarMapa();
+  final sitio = await viewModel.obtenerSitioMasCercano();
+
+  if (sitio != null && viewModel.ubicacionActual != null) {
+    if (agregarMarcador) {
+      // 👇 NO limpiar los marcadores, solo actualizar o añadir el del sitio
+      setState(() {
+        _markers.removeWhere((m) => m.markerId.value == "sitio_cercano");
+        _markers.add(
+          Marker(
+            markerId: const MarkerId('sitio_cercano'),
+            position: LatLng(sitio.latitud, sitio.longitud),
+            infoWindow: InfoWindow(
+              title: sitio.nombre,
+              snippet: 'Sitio más cercano',
+            ),
+            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          ),
+        );
+      });
+    } else {
+      // Versión original si se llama desde el cambio de modo
+      setState(() {
+        _markers.clear();
+        _markers.add(
+          Marker(
+            markerId: const MarkerId('sitio_cercano'),
+            position: LatLng(sitio.latitud, sitio.longitud),
+            infoWindow: InfoWindow(
+              title: sitio.nombre,
+              snippet: 'Sitio más cercano',
+            ),
+            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          ),
+        );
+      });
+    }
+
+    // 🔹 Centra el mapa entre el destino y el sitio más cercano si ambos existen
+    if (_destinoSeleccionado != null) {
+      final bounds = LatLngBounds(
+        southwest: LatLng(
+          min(_destinoSeleccionado!.latitude, sitio.latitud),
+          min(_destinoSeleccionado!.longitude, sitio.longitud),
+        ),
+        northeast: LatLng(
+          max(_destinoSeleccionado!.latitude, sitio.latitud),
+          max(_destinoSeleccionado!.longitude, sitio.longitud),
         ),
       );
-    });
-
-    // 🔹 Simulamos ubicación actual del usuario (por ahora un punto fijo)
-    _ubicacionActual ??= const LatLng(22.7700, -102.5720);
-
-    // 🔹 Si estamos en modo camión, dibujamos la Polyline simulada
-    if (!switchModo) {
-      _dibujarRutaSimulada(_ubicacionActual!, destino);
+      mapController?.animateCamera(CameraUpdate.newLatLngBounds(bounds, 60));
+    } else {
+      // Si no hay destino, centramos solo en el sitio
+      mapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(
+          LatLng(sitio.latitud, sitio.longitud),
+          15,
+        ),
+      );
     }
   }
+}
 
   void _dibujarRutaSimulada(LatLng inicio, LatLng destino) {
     // 🔸 Simulamos una "ruta" con puntos intermedios
@@ -220,8 +294,9 @@ class _HomeViewState extends State<HomeView> {
                   await _cargarParadasOptimizado();
                 }
               },
-              markers: recorridoVM.marcadores,
-              polylines: recorridoVM.polylines,
+              markers: _markers,
+              //markers: recorridoVM.marcadores, los comente por que no son relevantes para los taxis
+              //polylines: recorridoVM.polylines,
               circles: _circulos,
               //markers: _markers.union(viewModel.marcadores), // 👈 marcador del destino
               myLocationEnabled: true,
@@ -350,4 +425,8 @@ class _HomeViewState extends State<HomeView> {
       ),
     );
   }
+
+  //Taxis
+ 
+
 }
