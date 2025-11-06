@@ -23,7 +23,7 @@ class SitioViewModel extends ChangeNotifier {
 
   bool _cargando = false;
 
-  // Getters públicos
+  // 📍 Getters públicos
   List<SitioModel> get sitios => _sitios;
   SitioModel? get sitioMasCercano => _sitioMasCercano;
   Set<Marker> get markers => _markers;
@@ -32,7 +32,7 @@ class SitioViewModel extends ChangeNotifier {
   String? get distanciaAprox => _distanciaAprox;
   bool get cargando => _cargando;
 
-  // Asigna ubicaciones
+  // 📍 Setters públicos
   void setUbicacionActual(LatLng ubicacion) {
     _ubicacionActual = ubicacion;
     notifyListeners();
@@ -61,7 +61,10 @@ class SitioViewModel extends ChangeNotifier {
     SitioModel? sitioMasCercanoTemp;
 
     for (var sitio in _sitios) {
-      final distancia = _calcularDistancia(origen, LatLng(sitio.latitud, sitio.longitud));
+      final distancia = _calcularDistancia(
+        origen,
+        LatLng(sitio.latitud, sitio.longitud),
+      );
       if (distancia < minDist) {
         minDist = distancia;
         sitioMasCercanoTemp = sitio;
@@ -87,8 +90,15 @@ class SitioViewModel extends ChangeNotifier {
       _polylines.clear();
       notifyListeners();
 
+      _ubicacionActual = origen;
+      _destinoSeleccionado = destino;
+
       final url = Uri.parse(
-          'https://maps.googleapis.com/maps/api/directions/json?origin=${origen.latitude},${origen.longitude}&destination=${destino.latitude},${destino.longitude}&mode=driving&key=$apiKey');
+        'https://maps.googleapis.com/maps/api/directions/json?'
+        'origin=${origen.latitude},${origen.longitude}'
+        '&destination=${destino.latitude},${destino.longitude}'
+        '&mode=driving&key=$apiKey',
+      );
 
       final response = await http.get(url);
       final data = json.decode(response.body);
@@ -97,9 +107,9 @@ class SitioViewModel extends ChangeNotifier {
         final route = data['routes'][0];
         final leg = route['legs'][0];
 
-        // 🟡 Polyline
-        final polylinePoints = PolylinePoints(apiKey: 'AIzaSyDkcaTrFPn2PafDX85VmT-XEKS2qnk7oe8');
-        final decodedPoints = PolylinePoints.decodePolyline(route['overview_polyline']['points']);
+        // 🟡 Decodificar polyline
+        final decodedPoints = PolylinePoints
+            .decodePolyline(route['overview_polyline']['points']);
         final List<LatLng> polylineCoords = decodedPoints
             .map((p) => LatLng(p.latitude, p.longitude))
             .toList();
@@ -115,8 +125,10 @@ class SitioViewModel extends ChangeNotifier {
         if (_sitioMasCercano != null) {
           _markers.add(Marker(
             markerId: const MarkerId("sitioMasCercano"),
-            position: LatLng(_sitioMasCercano!.latitud, _sitioMasCercano!.longitud),
-            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+            position:
+                LatLng(_sitioMasCercano!.latitud, _sitioMasCercano!.longitud),
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+                BitmapDescriptor.hueAzure),
             infoWindow: InfoWindow(
               title: _sitioMasCercano!.nombre,
               snippet: "Sitio más cercano",
@@ -127,7 +139,8 @@ class SitioViewModel extends ChangeNotifier {
         _markers.add(Marker(
           markerId: const MarkerId("destino"),
           position: destino,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+              BitmapDescriptor.hueRed),
           infoWindow: const InfoWindow(title: "Destino seleccionado"),
         ));
 
@@ -135,10 +148,10 @@ class SitioViewModel extends ChangeNotifier {
         _tiempoEstimado = leg['duration']['text'];
         _distanciaAprox = leg['distance']['text'];
       } else {
-        debugPrint("Error en la API Directions: ${data['status']}");
+        debugPrint("❌ Error en Directions API: ${data['status']}");
       }
     } catch (e) {
-      debugPrint("Error al calcular ruta taxi: $e");
+      debugPrint("⚠️ Error al calcular ruta taxi: $e");
     } finally {
       _cargando = false;
       notifyListeners();
@@ -146,7 +159,7 @@ class SitioViewModel extends ChangeNotifier {
   }
 
   // --------------------------------------------------
-  // 4️⃣ Limpiar mapa
+  // 4️⃣ Limpiar mapa (usado por el botón "X")
   // --------------------------------------------------
   void limpiarMapaTaxi() {
     _markers.clear();
@@ -154,26 +167,26 @@ class SitioViewModel extends ChangeNotifier {
     _tiempoEstimado = null;
     _distanciaAprox = null;
     _sitioMasCercano = null;
+    _ubicacionActual = null;
+    _destinoSeleccionado = null;
     notifyListeners();
   }
 
   // --------------------------------------------------
-  // 🔹 Utilidad: Calcular distancia entre dos puntos
+  // 🔹 Calcular distancia entre dos puntos
   // --------------------------------------------------
   double _calcularDistancia(LatLng p1, LatLng p2) {
     const R = 6371; // km
     final dLat = _toRadians(p2.latitude - p1.latitude);
     final dLng = _toRadians(p2.longitude - p1.longitude);
-    final a = 
-        (sin(dLat / 2) * sin(dLat / 2)) +
+    final a = sin(dLat / 2) * sin(dLat / 2) +
         cos(_toRadians(p1.latitude)) *
             cos(_toRadians(p2.latitude)) *
-            (sin(dLng / 2) * sin(dLng / 2));
+            sin(dLng / 2) *
+            sin(dLng / 2);
     final c = 2 * atan2(sqrt(a), sqrt(1 - a));
     return R * c;
   }
 
-  double _toRadians(double degree) {
-    return degree * (3.141592653589793 / 180);
-  }
+  double _toRadians(double degree) => degree * (pi / 180);
 }

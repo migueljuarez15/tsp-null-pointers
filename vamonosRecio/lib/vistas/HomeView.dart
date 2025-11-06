@@ -29,11 +29,13 @@ class _HomeViewState extends State<HomeView> {
   bool mostrandoMensaje = true;
   double _zoomActual = 13;
   LatLng? _destinoSeleccionado;
+  LatLng? _ubicacionActual;
 
   List<ParadaModel> _todasParadas = [];
   List<SitioModel> _todosSitios = [];
   Set<Circle> _circulos = {};
   Set<Marker> _markers = {};
+  Set<Polyline> _rutas = {};
 
   final _db = DatabaseHelper();
 
@@ -79,9 +81,6 @@ class _HomeViewState extends State<HomeView> {
           fillColor: const Color(0xFF137fec).withOpacity(0.5),
           strokeColor: Colors.blueAccent,
           strokeWidth: 1,
-          consumeTapEvents: true,
-          onTap: () => ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text(p.nombre))),
         ),
       );
     }
@@ -111,7 +110,8 @@ class _HomeViewState extends State<HomeView> {
           circleId: CircleId('sitio_${s.idSitio}'),
           center: LatLng(s.latitud, s.longitud),
           radius: 15,
-          fillColor: const Color.fromARGB(255, 236, 76, 76).withOpacity(0.5),
+          fillColor:
+              const Color.fromARGB(255, 236, 76, 76).withOpacity(0.5),
           strokeColor: const Color.fromARGB(255, 255, 44, 44),
           strokeWidth: 1,
         ),
@@ -121,27 +121,23 @@ class _HomeViewState extends State<HomeView> {
     setState(() => _circulos = visibles);
   }
 
-  Future<void> _toggleModo() async {
-    final sitioVM = context.read<SitioViewModel>();
-    sitioVM.limpiarMapaTaxi();
-
-  // 🔁 Cambio de modo (Ruta <-> Taxi)
+  // 🔁 Modo Transporte ↔ Taxi (versión fusionada)
   Future<void> _toggleModo() async {
     final recorridoVM = context.read<RecorridoViewModel>();
+    final sitioVM = context.read<SitioViewModel>();
 
-    // 🧹 Limpieza total del mapa y estado
+    // Limpieza total del mapa
     recorridoVM.resetearTodo();
+    sitioVM.limpiarMapaTaxi();
+
     setState(() {
       _rutaSeleccionadaId = null;
       _textoBusqueda = "Buscar";
       _destinoSeleccionado = null;
-      _circulos.clear();
-      switchModo = !switchModo;
-      _rutas.clear();
       _markers.clear();
       _circulos.clear();
+      switchModo = !switchModo;
       mostrandoMensaje = true;
-      _textoBusqueda = "Buscar";
     });
 
     await _cargarContenido();
@@ -151,25 +147,12 @@ class _HomeViewState extends State<HomeView> {
     });
   }
 
+  // 📍 Lógica de marcar destino (CU1 y CU2 fusionados)
   Future<void> _marcarDestino(LatLng destino) async {
     _ubicacionActual ??= const LatLng(22.7700, -102.5720);
-    final sitioVM = context.read<SitioViewModel>();
-
-    setState(() {
-      _destinoSeleccionado = destino;
-      _rutas.clear();
-      _markers.removeWhere((m) => m.markerId.value == "destino_buscado");
-      _markers.add(
-        Marker(
-          markerId: const MarkerId("destino_buscado"),
-          position: destino,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-          infoWindow: const InfoWindow(title: "Destino seleccionado"),
-        ),
-      );
-    });
 
     if (switchModo) {
+      // 🚕 Lógica modo taxi
       final sitioVM = context.read<SitioViewModel>();
       await sitioVM.cargarSitios();
       final sitio = await sitioVM.obtenerSitioMasCercano(_ubicacionActual!);
@@ -181,81 +164,49 @@ class _HomeViewState extends State<HomeView> {
         );
       }
     } else {
-      _dibujarRutaSimulada(_ubicacionActual!, destino);
-    }
-  }
-
-  void _dibujarRutaSimulada(LatLng inicio, LatLng destino) {
-    final puntos = [
-      inicio,
-      LatLng((inicio.latitude + destino.latitude) / 2 + 0.002,
-          (inicio.longitude + destino.longitude) / 2 - 0.002),
-      destino,
-    ];
-
-    setState(() {
-      _rutas.clear();
-      _rutas.add(Polyline(
-        polylineId: const PolylineId("ruta_simulada"),
-        points: puntos,
-        color: Colors.blueAccent,
-        width: 5,
-      ));
-    });
-  // 📍 Marcar destino o gestionar búsqueda
-  void _marcarDestino(LatLng destino) async {
-    final recorridoVM = context.read<RecorridoViewModel>();
-    setState(() => _destinoSeleccionado = destino);
-
-    if (!switchModo) {
-      // 🚌 Lógica de rutas
+      // 🚌 Lógica transporte público
+      final recorridoVM = context.read<RecorridoViewModel>();
       recorridoVM.marcarDestino(destino);
       await recorridoVM.buscarRutasCercanas(destino);
-    } else {
-      // 🚕 Lógica modo taxi
-      recorridoVM.resetearTodo();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Modo Taxi activo: mostrando sitios disponibles"),
-          duration: Duration(seconds: 2),
-        ),
-      );
     }
+
+    setState(() {
+      _destinoSeleccionado = destino;
+      _textoBusqueda = "Destino seleccionado";
+    });
   }
-  
+
   @override
   Widget build(BuildContext context) {
-    final recorridoVM = context.read<RecorridoViewModel>();
-    final sitioVM = context.watch<SitioViewModel>();
-    final primary = const Color(0xFF137fec);
-    final traficoVM = context.watch<TraficoViewModel>();
     final recorridoVM = context.watch<RecorridoViewModel>();
+    final sitioVM = context.watch<SitioViewModel>();
+    final traficoVM = context.watch<TraficoViewModel>();
+    final primary = const Color(0xFF137fec);
 
     return Scaffold(
       body: SafeArea(
         child: Stack(
           children: [
+            // 🗺️ Mapa principal
             GoogleMap(
               initialCameraPosition:
                   CameraPosition(target: MapService.centroZacatecas, zoom: 13),
               onMapCreated: (controller) => mapController = controller,
-              onCameraMove: (position) async {
-                _zoomActual = position.zoom;
-                if (!switchModo) {
-                  await _cargarParadasOptimizado();
-                } else {
-                  await _cargarSitiosOptimizado();
-                }
+              onCameraMove: (pos) async {
+                _zoomActual = pos.zoom;
+                await _cargarContenido();
               },
-              markers: switchModo ? sitioVM.markers : _markers,
-              polylines: switchModo ? sitioVM.polylines : _rutas,
-              markers: switchModo ? {} : recorridoVM.marcadores,
-              polylines: switchModo ? {} : recorridoVM.polylines,
+              markers: switchModo
+                  ? sitioVM.markers
+                  : recorridoVM.marcadores.union(_markers),
+              polylines: switchModo
+                  ? sitioVM.polylines
+                  : recorridoVM.polylines.union(_rutas),
               circles: _circulos,
               myLocationEnabled: true,
               myLocationButtonEnabled: true,
               zoomControlsEnabled: false,
-              trafficEnabled: traficoVM.trafficEnabled, 
+              trafficEnabled: traficoVM.trafficEnabled,
             ),
 
             // 🔍 Barra de búsqueda
@@ -269,23 +220,13 @@ class _HomeViewState extends State<HomeView> {
                     context,
                     MaterialPageRoute(builder: (_) => const BusquedaView()),
                   );
-
                   if (resultado != null && mapController != null) {
-                    final recorridoVM = context.read<RecorridoViewModel>();
-                    recorridoVM.resetearTodo();
-
                     final LatLng destino = resultado['coordenadas'];
                     final String nombre = resultado['nombre'];
 
                     mapController!.animateCamera(
-                      CameraUpdate.newLatLngZoom(destino, 15),
-                    );
-
-                    _marcarDestino(destino);
-
-                    if (!switchModo) {
-                      await recorridoVM.dibujarRutaDesdeBD(1);
-                    }
+                        CameraUpdate.newLatLngZoom(destino, 15));
+                    await _marcarDestino(destino);
 
                     setState(() => _textoBusqueda = nombre);
                   }
@@ -313,12 +254,8 @@ class _HomeViewState extends State<HomeView> {
                         child: Text(
                           _textoBusqueda,
                           style: TextStyle(
-                            fontSize: 16,
-                            color: Colors.grey[700],
-                          ),
+                              fontSize: 16, color: Colors.grey[700]),
                           overflow: TextOverflow.ellipsis,
-                          maxLines: 1,
-                          softWrap: false,
                         ),
                       ),
                     ],
@@ -327,58 +264,16 @@ class _HomeViewState extends State<HomeView> {
               ),
             ),
 
-            // 🚖 Popup del taxi
-            if (switchModo) const Positioned(
-              top: 70,
-              left: 12,
-              right: 12,
-              child: TaxiInfoDropdown(),
-            ),
-
-            if (mostrandoMensaje)
-              Positioned(
-                top: 130,
-                left: 40,
-                right: 40,
-                child: AnimatedOpacity(
-                  opacity: mostrandoMensaje ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 500),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
-                    decoration: BoxDecoration(
-                      color: Colors.black87.withOpacity(0.75),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Center(
-                      child: Text(
-                        switchModo
-                            ? "Modo Taxi - Sitios Cercanos"
-                            : "Modo Transporte Público",
-                        style: GoogleFonts.plusJakartaSans(
-                          color: Colors.white,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+            // 🚕 Popup taxi
+            if (switchModo)
+              const Positioned(
+                top: 70,
+                left: 12,
+                right: 12,
+                child: TaxiInfoDropdown(),
               ),
 
-                    setState(() {
-                      _textoBusqueda = nombre;
-                      _rutaSeleccionadaId = null;
-                      _destinoSeleccionado = destino;
-                    });
-
-                    // 🔹 Lógica dependiente del modo
-                    _marcarDestino(destino);
-                  }
-                },
-                child: _buildSearchBar(),
-              ),
-            ),
-
-            // 🧭 Dropdown rutas (solo si NO es modo taxi)
+            // 🧭 Dropdown rutas (solo modo rutas)
             if (!switchModo &&
                 _destinoSeleccionado != null &&
                 recorridoVM.rutasCandidatas.isNotEmpty)
@@ -389,10 +284,10 @@ class _HomeViewState extends State<HomeView> {
                 child: _buildDropdown(recorridoVM),
               ),
 
-            // 🟦 Mensaje de modo actual
+            // 🟦 Mensaje de modo
             if (mostrandoMensaje) _buildModoMensaje(),
 
-            // 🔁 Botón para cambiar modo
+            // 🔁 Botón cambiar modo
             Positioned(
               bottom: 24,
               right: 24,
@@ -407,53 +302,27 @@ class _HomeViewState extends State<HomeView> {
               ),
             ),
 
-            //Boton para ver el mapa con trafico
+            // 🛣️ Botón de tráfico
             Positioned(
               bottom: 92,
               right: 24,
               child: GestureDetector(
                 onTap: () => traficoVM.mostrarMapaTrafico(context),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 250),
-                  curve: Curves.easeInOut,
-                  padding: const EdgeInsets.all(2),
-                  decoration: BoxDecoration(
-                    // Borde sutil y sombra para que parezca botón estilo taxi
+                child: CircleAvatar(
+                  radius: 28,
+                  backgroundColor: traficoVM.trafficEnabled
+                      ? Colors.green
+                      : Colors.yellow[700],
+                  child: Icon(
+                    traficoVM.trafficEnabled
+                        ? Icons.traffic
+                        : Icons.map,
                     color: Colors.white,
-                    borderRadius: BorderRadius.circular(50),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.18),
-                        blurRadius: 8,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: CircleAvatar(
-                    radius: 28,
-                    backgroundColor: traficoVM.trafficEnabled ? Colors.green : Colors.yellow[700],
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 220),
-                      transitionBuilder: (child, anim) =>
-                          ScaleTransition(scale: anim, child: child),
-                      child: traficoVM.trafficEnabled
-                          ? const Icon(
-                              Icons.traffic,
-                              key: ValueKey('traffic_on'),
-                              color: Colors.white,
-                              size: 28,
-                            )
-                          : const Icon(
-                              Icons.map,
-                              key: ValueKey('map_icon'),
-                              color: Colors.black,
-                              size: 28,
-                            ),
-                    ),
                   ),
                 ),
               ),
             ),
+
             if (recorridoVM.cargando)
               const Center(child: CircularProgressIndicator()),
           ],
@@ -461,167 +330,8 @@ class _HomeViewState extends State<HomeView> {
       ),
     );
   }
-}
 
-// 🔹 Nuevo Widget del popup
-class TaxiInfoDropdown extends StatefulWidget {
-  const TaxiInfoDropdown({super.key});
-
-  @override
-  State<TaxiInfoDropdown> createState() => _TaxiInfoDropdownState();
-}
-
-class _TaxiInfoDropdownState extends State<TaxiInfoDropdown> {
-  bool _expandido = true;
-
-  @override
-  Widget build(BuildContext context) {
-    final sitioVM = context.watch<SitioViewModel>();
-    final sitio = sitioVM.sitioMasCercano?.nombre ?? "N/A";
-    final tiempo = sitioVM.tiempoEstimado ?? "—";
-    final distancia = sitioVM.distanciaAprox ?? "—";
-
-    if (sitioVM.tiempoEstimado == null && sitioVM.distanciaAprox == null) {
-      return const SizedBox.shrink();
-    }
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: _expandido
-          ? Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 🔹 Encabezado principal
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: const [
-                        Icon(Icons.local_taxi, color: Color.fromARGB(255, 0, 0, 0)),
-                        SizedBox(width: 8),
-                        Text(
-                          "Trayecto de Taxi",
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                          ),
-                        ),
-                      ],
-                    ),
-                    Row(
-                      children: [
-                        IconButton(
-                          onPressed: () => setState(() => _expandido = false),
-                          icon: const Icon(Icons.keyboard_arrow_up),
-                        ),
-                        IconButton(
-                          onPressed: () {
-                            final sitioVM = context.read<SitioViewModel>();
-                            sitioVM.limpiarMapaTaxi();
-                          },
-                          icon: const Icon(Icons.close, color: Colors.grey),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 10),
-                _buildInfoRow("Sitio más cercano:", sitio),
-                _buildInfoRow("Tiempo estimado:", tiempo),
-                _buildInfoRow("Distancia:", distancia),
-              ],
-            )
-          : Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                // 🔹 Parte izquierda (etiqueta + icono)
-                InkWell(
-                  onTap: () => setState(() => _expandido = true),
-                  child: Row(
-                    children: const [
-                      Icon(Icons.local_taxi, color: Color.fromARGB(255, 0, 0, 0)),
-                      SizedBox(width: 8),
-                      Text(
-                        "Trayecto de Taxi",
-                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
-                      ),
-                      SizedBox(width: 4),
-                      Icon(Icons.keyboard_arrow_down, color: Colors.grey),
-                    ],
-                  ),
-                ),
-
-                // 🔹 Parte derecha (botón de cerrar SIEMPRE visible)
-                IconButton(
-                  onPressed: () {
-                    final sitioVM = context.read<SitioViewModel>();
-                    sitioVM.limpiarMapaTaxi();
-                  },
-                  icon: const Icon(Icons.close, color: Colors.grey),
-                ),
-              ],
-            ),
-    );
-  }
-
-  Widget _buildInfoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
-          Text(value),
-        ],
-      ),
-    );
-  }
-
-  // 🔍 Barra de búsqueda visual
-  Widget _buildSearchBar() => Container(
-        height: 48,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(999),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.15),
-              blurRadius: 6,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        alignment: Alignment.centerLeft,
-        child: Row(
-          children: [
-            const Icon(Icons.search, color: Colors.grey),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                _textoBusqueda,
-                style: TextStyle(fontSize: 16, color: Colors.grey[700]),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-      );
-
-  // 🧭 Dropdown con rutas personalizadas
+  // 🔹 Dropdown rutas transporte
   Widget _buildDropdown(RecorridoViewModel recorridoVM) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -642,10 +352,7 @@ class _TaxiInfoDropdownState extends State<TaxiInfoDropdown> {
             child: DropdownButtonHideUnderline(
               child: DropdownButton<String>(
                 isExpanded: true,
-                value: recorridoVM.rutasCandidatas.any((ruta) =>
-                        ruta.idRuta.toString() == _rutaSeleccionadaId)
-                    ? _rutaSeleccionadaId
-                    : null,
+                value: _rutaSeleccionadaId,
                 hint: const Text("Selecciona una ruta sugerida"),
                 items: recorridoVM.rutasCandidatas.map((ruta) {
                   Color colorFondo;
@@ -683,7 +390,6 @@ class _TaxiInfoDropdownState extends State<TaxiInfoDropdown> {
                     default:
                       colorFondo = Colors.grey;
                   }
-
                   return DropdownMenuItem<String>(
                     value: ruta.idRuta.toString(),
                     child: Container(
@@ -720,8 +426,7 @@ class _TaxiInfoDropdownState extends State<TaxiInfoDropdown> {
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.close, color: Colors.black),
-            tooltip: 'Limpiar mapa',
+            icon: const Icon(Icons.close),
             onPressed: () {
               final recorridoVM = context.read<RecorridoViewModel>();
               recorridoVM.resetearTodo();
@@ -737,7 +442,7 @@ class _TaxiInfoDropdownState extends State<TaxiInfoDropdown> {
     );
   }
 
-  // 🟦 Mensaje de cambio de modo
+  // 🔹 Mensaje de modo actual
   Widget _buildModoMensaje() => Positioned(
         top: 70,
         left: 40,
@@ -746,7 +451,8 @@ class _TaxiInfoDropdownState extends State<TaxiInfoDropdown> {
           opacity: mostrandoMensaje ? 1.0 : 0.0,
           duration: const Duration(milliseconds: 500),
           child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+            padding:
+                const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
             decoration: BoxDecoration(
               color: Colors.black87.withOpacity(0.75),
               borderRadius: BorderRadius.circular(12),
@@ -754,15 +460,119 @@ class _TaxiInfoDropdownState extends State<TaxiInfoDropdown> {
             child: Center(
               child: Text(
                 switchModo
-                    ? "Mostrando Sitios de Taxi"
-                    : "Mostrando Paradas de Rutas",
+                    ? "Modo Taxi"
+                    : "Modo Transporte Público",
                 style: GoogleFonts.plusJakartaSans(
-                  color: Colors.white,
-                  fontSize: 14,
-                ),
+                    color: Colors.white, fontSize: 14),
               ),
             ),
           ),
         ),
+      );
+}
+
+// 🚕 Popup taxi minimizable y con “X” persistente
+class TaxiInfoDropdown extends StatefulWidget {
+  const TaxiInfoDropdown({super.key});
+
+  @override
+  State<TaxiInfoDropdown> createState() => _TaxiInfoDropdownState();
+}
+
+class _TaxiInfoDropdownState extends State<TaxiInfoDropdown> {
+  bool _expandido = true;
+
+  @override
+  Widget build(BuildContext context) {
+    final sitioVM = context.watch<SitioViewModel>();
+    final sitio = sitioVM.sitioMasCercano?.nombre ?? "N/A";
+    final tiempo = sitioVM.tiempoEstimado ?? "—";
+    final distancia = sitioVM.distanciaAprox ?? "—";
+
+    if (sitioVM.tiempoEstimado == null && sitioVM.distanciaAprox == null) {
+      return const SizedBox.shrink();
+    }
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 8,
+              offset: const Offset(0, 2)),
+        ],
+      ),
+      child: _expandido
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Row(children: [
+                        Icon(Icons.local_taxi),
+                        SizedBox(width: 8),
+                        Text("Trayecto de Taxi",
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 18)),
+                      ]),
+                      Row(children: [
+                        IconButton(
+                          onPressed: () =>
+                              setState(() => _expandido = false),
+                          icon: const Icon(Icons.keyboard_arrow_up),
+                        ),
+                        IconButton(
+                          onPressed: () {
+                            context.read<SitioViewModel>().limpiarMapaTaxi();
+                          },
+                          icon:
+                              const Icon(Icons.close, color: Colors.grey),
+                        ),
+                      ])
+                    ]),
+                const SizedBox(height: 10),
+                _buildInfoRow("Sitio más cercano:", sitio),
+                _buildInfoRow("Tiempo estimado:", tiempo),
+                _buildInfoRow("Distancia:", distancia),
+              ],
+            )
+          : Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                InkWell(
+                  onTap: () => setState(() => _expandido = true),
+                  child: const Row(children: [
+                    Icon(Icons.local_taxi),
+                    SizedBox(width: 8),
+                    Text("Trayecto de Taxi",
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 18)),
+                    Icon(Icons.keyboard_arrow_down, color: Colors.grey),
+                  ]),
+                ),
+                IconButton(
+                  onPressed: () {
+                    context.read<SitioViewModel>().limpiarMapaTaxi();
+                  },
+                  icon: const Icon(Icons.close, color: Colors.grey),
+                ),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+              Text(value)
+            ]),
       );
 }
