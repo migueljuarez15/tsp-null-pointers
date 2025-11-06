@@ -129,4 +129,28 @@ class HomeViewModel extends ChangeNotifier {
     };
     notifyListeners();
   }
+
+  //Taxis
+  // 🔸 Encuentra el sitio más cercano a la ubicación actual
+Future<SitioModel?> obtenerSitioMasCercano() async {
+  if (ubicacionActual == null) return null;
+
+  final sitios = await _db.obtenerSitios();
+  SitioModel? masCercano;
+  double menorDistancia = double.infinity;
+
+  for (var s in sitios) {
+    final distancia = _distanciaEntre(
+      ubicacionActual!,
+      LatLng(s.latitud, s.longitud),
+    );
+    if (distancia < menorDistancia) {
+      menorDistancia = distancia;
+      masCercano = s;
+    }
+  }
+
+  return masCercano;
+}
+
 }
