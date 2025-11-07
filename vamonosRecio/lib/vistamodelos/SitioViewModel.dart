@@ -128,7 +128,7 @@ class SitioViewModel extends ChangeNotifier {
             position:
                 LatLng(_sitioMasCercano!.latitud, _sitioMasCercano!.longitud),
             icon: BitmapDescriptor.defaultMarkerWithHue(
-                BitmapDescriptor.hueAzure),
+                BitmapDescriptor.hueBlue),
             infoWindow: InfoWindow(
               title: _sitioMasCercano!.nombre,
               snippet: "Sitio más cercano",
