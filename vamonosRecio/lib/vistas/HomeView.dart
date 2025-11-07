@@ -174,11 +174,18 @@ class _HomeViewState extends State<HomeView> {
     }
 
     if (switchModo) {
-      // 🚕 Lógica modo taxi
       final sitioVM = context.read<SitioViewModel>();
       await sitioVM.cargarSitios();
       final sitio = await sitioVM.obtenerSitioMasCercano(_ubicacionActual!);
+
       if (sitio != null) {
+        // 🚶 Primero: ruta caminando al sitio
+        await sitioVM.calcularRutaCaminandoAlSitio(
+          origen: _ubicacionActual!,
+          apiKey: 'AIzaSyDkcaTrFPn2PafDX85VmT-XEKS2qnk7oe8',
+        );
+
+        // 🚕 Luego: ruta taxi desde el sitio al destino
         await sitioVM.calcularRutaTaxi(
           origen: LatLng(sitio.latitud, sitio.longitud),
           destino: destino,
@@ -335,13 +342,22 @@ class _HomeViewState extends State<HomeView> {
               ),
             ),
 
-            // 🚕 Popup taxi
-            if (switchModo)
+            // 🚕 Info del viaje taxi
+            if (switchModo && sitioVM.tiempoEstimado != null)
               const Positioned(
                 top: 70,
                 left: 12,
                 right: 12,
                 child: TaxiInfoDropdown(),
+              ),
+
+            // 🚶‍♂️ Popup de caminata al sitio de taxi
+            if (switchModo && sitioVM.mostrarPopupTaxiCaminando)
+              const Positioned(
+                top: 220,
+                left: 12,
+                right: 12,
+                child: TaxiWalkingPopup(),
               ),
 
             // 🧭 Dropdown rutas (solo modo rutas)
@@ -764,6 +780,119 @@ class _WalkingInfoPopupState extends State<WalkingInfoPopup> {
                 IconButton(
                   onPressed: () {
                     context.read<RecorridoViewModel>().limpiarRutaCaminando();
+                  },
+                  icon: const Icon(Icons.close, color: Colors.grey),
+                ),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+              Text(value),
+            ]),
+      );
+}
+
+// 🚕 Popup caminata hacia sitio de taxi (CU-5)
+class TaxiWalkingPopup extends StatefulWidget {
+  const TaxiWalkingPopup({super.key});
+
+  @override
+  State<TaxiWalkingPopup> createState() => _TaxiWalkingPopupState();
+}
+
+class _TaxiWalkingPopupState extends State<TaxiWalkingPopup> {
+  bool _expandido = true;
+
+  @override
+  Widget build(BuildContext context) {
+    final sitioVM = context.watch<SitioViewModel>();
+    final sitio = sitioVM.sitioMasCercano?.nombre ?? "—";
+    final tiempo = sitioVM.tiempoCaminando ?? "—";
+    final distancia = sitioVM.distanciaCaminando ?? "—";
+
+    // No mostrar si no hay datos
+    if (sitioVM.sitioMasCercano == null ||
+        sitioVM.tiempoCaminando == null ||
+        sitioVM.distanciaCaminando == null) {
+      return const SizedBox.shrink();
+    }
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: _expandido
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Row(children: [
+                        Icon(Icons.directions_walk, color: Color.fromARGB(255, 0, 0, 0)),
+                        SizedBox(width: 8),
+                        Text("Ruta a pie",
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 18)),
+                      ]),
+                      Row(children: [
+                        IconButton(
+                          onPressed: () =>
+                              setState(() => _expandido = false),
+                          icon: const Icon(Icons.keyboard_arrow_up),
+                        ),
+                        IconButton(
+                          onPressed: () {
+                            final sitioVM = context.read<SitioViewModel>();
+                            sitioVM.limpiarRutaCaminandoTaxi();
+                            sitioVM.ocultarPopupTaxiCaminando();
+                          },
+                          icon: const Icon(Icons.close, color: Colors.grey),
+                        ),
+                      ])
+                    ]),
+                const SizedBox(height: 10),
+                _buildInfoRow("Sitio más cercano:", sitio),
+                _buildInfoRow("Tiempo estimado:", tiempo),
+                _buildInfoRow("Distancia:", distancia),
+              ],
+            )
+          : Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                InkWell(
+                  onTap: () => setState(() => _expandido = true),
+                  child: const Row(children: [
+                    Icon(Icons.directions_walk, color: Color.fromARGB(255, 0, 0, 0)),
+                    SizedBox(width: 8),
+                    Text("Ruta a pie",
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 18)),
+                    Icon(Icons.keyboard_arrow_down, color: Colors.grey),
+                  ]),
+                ),
+                IconButton(
+                  onPressed: () {
+                    final sitioVM = context.read<SitioViewModel>();
+                    sitioVM.limpiarRutaCaminandoTaxi();
+                    sitioVM.ocultarPopupTaxiCaminando();
                   },
                   icon: const Icon(Icons.close, color: Colors.grey),
                 ),
