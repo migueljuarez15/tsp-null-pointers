@@ -12,6 +12,7 @@ import 'package:vamonos_recio/vistamodelos/TraficoViewModel.dart';
 import '../services/DatabaseHelper.dart';
 import '../services/MapService.dart';
 import 'BusquedaView.dart';
+import 'package:geolocator/geolocator.dart';
 
 class HomeView extends StatefulWidget {
   const HomeView({super.key});
@@ -42,6 +43,7 @@ class _HomeViewState extends State<HomeView> {
   @override
   void initState() {
     super.initState();
+    _obtenerUbicacionActual();
     _cargarContenido();
     Future.delayed(const Duration(seconds: 3), () {
       if (mounted) setState(() => mostrandoMensaje = false);
@@ -163,7 +165,13 @@ class _HomeViewState extends State<HomeView> {
 
   // 📍 Lógica de marcar destino (CU1 y CU2 fusionados)
   Future<void> _marcarDestino(LatLng destino) async {
-    _ubicacionActual ??= const LatLng(22.7700, -102.5720);
+    //Si quieres usar una ubicacion ya predefinida descomenta esta linea y comenta el if
+    //_ubicacionActual ??= const LatLng(22.7700, -102.5720);
+
+    //Si quieres usar una ubicacion ya predefinida comenta este bloque if
+    if (_ubicacionActual == null) {
+      await _obtenerUbicacionActual();
+    }
 
     if (switchModo) {
       // 🚕 Lógica modo taxi
@@ -189,6 +197,53 @@ class _HomeViewState extends State<HomeView> {
       _textoBusqueda = "Destino seleccionado";
     });
   }
+
+  Future<void> _obtenerUbicacionActual() async {
+    bool serviceEnabled;
+    LocationPermission permission;
+
+    // Verifica si el servicio de ubicación está habilitado
+    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      // Si el usuario tiene desactivado el GPS
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Por favor activa el GPS')),
+      );
+      return;
+    }
+
+    // Verifica y solicita permisos
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Permiso de ubicación denegado')),
+        );
+        return;
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      // Permiso negado permanentemente
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Los permisos de ubicación están bloqueados')),
+      );
+      return;
+    }
+
+    // ✅ Si todo está bien, obtiene la ubicación actual
+    final posicion = await Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.high,
+    );
+
+    setState(() {
+      _ubicacionActual = LatLng(posicion.latitude, posicion.longitude);
+    });
+
+    print('Ubicación actual: $_ubicacionActual');
+  }
+
 
   @override
   Widget build(BuildContext context) {
