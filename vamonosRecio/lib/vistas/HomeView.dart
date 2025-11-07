@@ -140,6 +140,8 @@ class _HomeViewState extends State<HomeView> {
 
     // Limpieza total del mapa
     recorridoVM.resetearTodo();
+    recorridoVM.limpiarRutaCaminando();
+    recorridoVM.ocultarPopupRutaCaminando();
     sitioVM.limpiarMapaTaxi();
 
     setState(() {
@@ -212,8 +214,10 @@ class _HomeViewState extends State<HomeView> {
                   ? sitioVM.markers
                   : recorridoVM.marcadores.union(_markers),
               polylines: switchModo
-                  ? sitioVM.polylines
-                  : recorridoVM.polylines.union(_rutas),
+                ? sitioVM.polylines
+                : recorridoVM.polylines
+                .union(_rutas)
+                .union(recorridoVM.rutaCaminando),
               circles: _circulos,
               myLocationEnabled: true,
               myLocationButtonEnabled: true,
@@ -294,6 +298,15 @@ class _HomeViewState extends State<HomeView> {
                 left: 12,
                 right: 12,
                 child: _buildDropdown(recorridoVM),
+              ),
+
+            // 🚶 Popup caminata (solo modo transporte público)
+            if (!switchModo && recorridoVM.mostrarPopupCaminando)
+              const Positioned(
+                top: 150,
+                left: 12,
+                right: 12,
+                child: WalkingInfoPopup(),
               ),
 
             // 🟦 Mensaje de modo
@@ -432,6 +445,21 @@ class _HomeViewState extends State<HomeView> {
                   if (valor != null) {
                     setState(() => _rutaSeleccionadaId = valor);
                     await recorridoVM.dibujarRutaDesdeBD(int.parse(valor));
+
+                    // 🧭 CU-4: Calcular parada más cercana automáticamente al elegir ruta
+                    recorridoVM.setUbicacionActual(_ubicacionActual ?? const LatLng(22.7700, -102.5720));
+                    await recorridoVM.obtenerParadaMasCercana(int.parse(valor));
+
+                    if (recorridoVM.paradaMasCercana != null && _ubicacionActual != null) {
+                      await recorridoVM.calcularRutaCaminando(
+                        origen: _ubicacionActual!,
+                        destino: LatLng(
+                          recorridoVM.paradaMasCercana!.latitud,
+                          recorridoVM.paradaMasCercana!.longitud,
+                        ),
+                        apiKey: 'AIzaSyDkcaTrFPn2PafDX85VmT-XEKS2qnk7oe8',
+                      );
+                    }
                   }
                 },
               ),
@@ -442,6 +470,8 @@ class _HomeViewState extends State<HomeView> {
             onPressed: () {
               final recorridoVM = context.read<RecorridoViewModel>();
               recorridoVM.resetearTodo();
+              recorridoVM.limpiarRutaCaminando();
+              recorridoVM.ocultarPopupRutaCaminando();
               setState(() {
                 _rutaSeleccionadaId = null;
                 _textoBusqueda = "Buscar";
@@ -548,9 +578,9 @@ class _TaxiInfoDropdownState extends State<TaxiInfoDropdown> {
                       ])
                     ]),
                 const SizedBox(height: 10),
-                _buildInfoRow("Sitio más cercano:", sitio),
-                _buildInfoRow("Tiempo estimado:", tiempo),
-                _buildInfoRow("Distancia:", distancia),
+                _buildInfoRowTaxi("Sitio más cercano:", sitio),
+                _buildInfoRowTaxi("Tiempo estimado:", tiempo),
+                _buildInfoRowTaxi("Distancia:", distancia),
               ],
             )
           : Row(
@@ -578,13 +608,122 @@ class _TaxiInfoDropdownState extends State<TaxiInfoDropdown> {
     );
   }
 
+  Widget _buildInfoRowTaxi(String label, String value) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+        Text(value)
+      ]),
+  );
+}
+
+// 🚶 Popup caminata (CU-4: Ruta hacia parada más cercana)
+class WalkingInfoPopup extends StatefulWidget {
+  const WalkingInfoPopup({super.key});
+
+  @override
+  State<WalkingInfoPopup> createState() => _WalkingInfoPopupState();
+}
+
+class _WalkingInfoPopupState extends State<WalkingInfoPopup> {
+  bool _expandido = true;
+
+  @override
+  Widget build(BuildContext context) {
+    final recorridoVM = context.watch<RecorridoViewModel>();
+    final parada = recorridoVM.paradaMasCercana?.nombre ?? "—";
+    final tiempo = recorridoVM.tiempoCaminando ?? "—";
+    final distancia = recorridoVM.distanciaCaminando ?? "—";
+
+    // No mostrar si no hay datos
+    if (recorridoVM.paradaMasCercana == null ||
+        recorridoVM.tiempoCaminando == null) {
+      return const SizedBox.shrink();
+    }
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 8,
+              offset: const Offset(0, 2)),
+        ],
+      ),
+      child: _expandido
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Row(children: [
+                        Icon(Icons.directions_walk),
+                        SizedBox(width: 8),
+                        Text("Ruta a pie",
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 18)),
+                      ]),
+                      Row(children: [
+                        IconButton(
+                          onPressed: () =>
+                              setState(() => _expandido = false),
+                          icon: const Icon(Icons.keyboard_arrow_up),
+                        ),
+                        IconButton(
+                          onPressed: () {
+                            final recorridoVM = context.read<RecorridoViewModel>();
+                            recorridoVM.limpiarRutaCaminando();
+                            recorridoVM.ocultarPopupRutaCaminando();
+                          },
+                          icon: const Icon(Icons.close, color: Colors.grey),
+                        ),
+                      ])
+                    ]),
+                const SizedBox(height: 10),
+                _buildInfoRow("Parada más cercana:", parada),
+                _buildInfoRow("Tiempo estimado:", tiempo),
+                _buildInfoRow("Distancia:", distancia),
+              ],
+            )
+          : Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                InkWell(
+                  onTap: () => setState(() => _expandido = true),
+                  child: const Row(children: [
+                    Icon(Icons.directions_walk),
+                    SizedBox(width: 8),
+                    Text("Ruta a pie",
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 18)),
+                    Icon(Icons.keyboard_arrow_down, color: Colors.grey),
+                  ]),
+                ),
+                IconButton(
+                  onPressed: () {
+                    context.read<RecorridoViewModel>().limpiarRutaCaminando();
+                  },
+                  icon: const Icon(Icons.close, color: Colors.grey),
+                ),
+              ],
+            ),
+    );
+  }
+
   Widget _buildInfoRow(String label, String value) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
-              Text(value)
+              Text(value),
             ]),
       );
 }

@@ -1,7 +1,10 @@
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:http/http.dart' as http;
 import 'package:vamonos_recio/modelos/RutaModel.dart';
 import '../modelos/ParadaModel.dart';
 import '../services/DatabaseHelper.dart';
@@ -193,6 +196,164 @@ class RecorridoViewModel extends ChangeNotifier {
     _marcadores.clear();
     _rutasCandidatas.clear();
     _destinoSeleccionado = null;
+    notifyListeners();
+  }
+
+  // --------------------------------------------------
+  // 5️⃣ Calcular ruta a pie (CU-4 - Parada más cercana)
+  // --------------------------------------------------
+  LatLng? _ubicacionActual;
+  ParadaModel? _paradaMasCercana;
+  Set<Polyline> _rutaCaminando = {};
+  Set<Marker> _markers = {};
+  bool _mostrandoRutaCaminando = false;
+  String? _distanciaCaminando;
+  String? _tiempoCaminando;
+  bool _mostrarPopupCaminando = false;
+  bool get mostrarPopupCaminando => _mostrarPopupCaminando;
+  LatLng? get ubicacionActual => _ubicacionActual;
+  ParadaModel? get paradaMasCercana => _paradaMasCercana;
+  Set<Polyline> get rutaCaminando => _rutaCaminando;
+  bool get mostrandoRutaCaminando => _mostrandoRutaCaminando;
+  String? get distanciaCaminando => _distanciaCaminando;
+  String? get tiempoCaminando => _tiempoCaminando;
+
+  /// 📍 Establece la ubicación actual del trabajador
+  void setUbicacionActual(LatLng ubicacion) {
+    _ubicacionActual = ubicacion;
+    notifyListeners();
+  }
+
+  /// 🔎 Obtiene la parada más cercana a la ubicación actual dentro de una ruta
+  Future<void> obtenerParadaMasCercana(int idRuta) async {
+    if (_ubicacionActual == null) {
+      debugPrint("⚠️ No se ha definido la ubicación actual.");
+      return;
+    }
+
+    try {
+      final paradas = await _db.obtenerParadasPorRuta(idRuta);
+      if (paradas.isEmpty) return;
+
+      ParadaModel? masCercana;
+      double minDist = double.infinity;
+
+      for (var p in paradas) {
+        final dist = _distanciaKm(
+          LatLng(p.latitud, p.longitud),
+          _ubicacionActual!,
+        );
+        if (dist < minDist) {
+          minDist = dist;
+          masCercana = p;
+        }
+      }
+
+      _paradaMasCercana = masCercana;
+
+      if (masCercana != null) {
+        // 🔹 Añadir marcador visual
+        _marcadores.add(
+          Marker(
+            markerId: const MarkerId("parada_mas_cercana"),
+            position: LatLng(masCercana.latitud, masCercana.longitud),
+            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
+            infoWindow: InfoWindow(
+              title: masCercana.nombre,
+              snippet: "Parada más cercana",
+            ),
+          ),
+        );
+      }
+
+      notifyListeners();
+    } catch (e) {
+      debugPrint("❌ Error al calcular parada más cercana: $e");
+    }
+  }
+
+  Future<void> calcularRutaCaminando({
+    required LatLng origen,
+    required LatLng destino,
+    required String apiKey,
+  }) async {
+    try {
+      _cargando = true;
+      _rutaCaminando.clear();
+      notifyListeners();
+
+      final url = Uri.parse(
+        'https://maps.googleapis.com/maps/api/directions/json?origin=${origen.latitude},${origen.longitude}&destination=${destino.latitude},${destino.longitude}&mode=walking&key=$apiKey',
+      );
+
+      final response = await http.get(url);
+      final data = json.decode(response.body);
+
+      if (data['status'] == 'OK') {
+        final route = data['routes'][0];
+        final leg = route['legs'][0];
+
+        // 🟢 Decodificar polyline
+        final decodedPoints =
+            PolylinePoints.decodePolyline(route['overview_polyline']['points']);
+        final List<LatLng> polylineCoords =
+            decodedPoints.map((p) => LatLng(p.latitude, p.longitude)).toList();
+
+        _rutaCaminando.add(Polyline(
+          polylineId: const PolylineId("rutaCaminando"),
+          color: const Color.fromARGB(255, 65, 105, 225), // Azul caminata
+          width: 5,
+          points: polylineCoords,
+          patterns: [PatternItem.dot, PatternItem.gap(20)], // 🔸 Línea punteada
+          geodesic: true, // suaviza las curvas
+        ));
+
+        // 🟡 Marcadores de inicio y destino
+        _markers.add(Marker(
+          markerId: const MarkerId("ubicacionActual"),
+          position: origen,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+          infoWindow: const InfoWindow(title: "Tu ubicación"),
+        ));
+
+        _markers.add(Marker(
+          markerId: const MarkerId("paradaCercana"),
+          position: destino,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow),
+          infoWindow: const InfoWindow(title: "Parada más cercana"),
+        ));
+
+        // ⏱ ETA y distancia
+        _tiempoCaminando = leg['duration']['text'];
+        _distanciaCaminando = leg['distance']['text'];
+        _mostrarPopupCaminando = true;
+      } else {
+        debugPrint("Error en la API Directions (walking): ${data['status']}");
+      }
+    } catch (e) {
+      debugPrint("Error al calcular ruta caminando: $e");
+    } finally {
+      _cargando = false;
+      notifyListeners();
+    }
+  }
+
+  /// ❌ Limpia la ruta caminando
+  void limpiarRutaCaminando() {
+    _rutaCaminando.clear();
+    _mostrandoRutaCaminando = false;
+    _paradaMasCercana = null;
+    _marcadores.removeWhere((m) => m.markerId.value == "parada_mas_cercana");
+    notifyListeners();
+  }
+
+  void mostrarPopupRutaCaminando() {
+    _mostrarPopupCaminando = true;
+    notifyListeners();
+  }
+
+  void ocultarPopupRutaCaminando() {
+    _mostrarPopupCaminando = false;
     notifyListeners();
   }
 }
