@@ -81,6 +81,12 @@ class _HomeViewState extends State<HomeView> {
           fillColor: const Color(0xFF137fec).withOpacity(0.5),
           strokeColor: Colors.blueAccent,
           strokeWidth: 1,
+          consumeTapEvents: true, 
+          onTap: () { 
+            ScaffoldMessenger.of(context).showSnackBar( 
+              SnackBar(content: Text(p.nombre)),
+            );
+          }
         ),
       );
     }
@@ -114,6 +120,12 @@ class _HomeViewState extends State<HomeView> {
               const Color.fromARGB(255, 236, 76, 76).withOpacity(0.5),
           strokeColor: const Color.fromARGB(255, 255, 44, 44),
           strokeWidth: 1,
+          consumeTapEvents: true,
+          onTap: () { 
+            ScaffoldMessenger.of(context).showSnackBar( 
+              SnackBar(content: Text(s.nombre)),
+            );
+          }
         ),
       );
     }
