@@ -7,6 +7,10 @@ import '../modelos/ParadaModel.dart';
 import '../modelos/SitioModel.dart';
 import '../services/MapService.dart';
 
+// ⭐ NUEVO: para poder interactuar con otros ViewModels sin usar BuildContext
+import 'RecorridoViewModel.dart';
+import 'SitioViewModel.dart';
+
 class HomeViewModel extends ChangeNotifier {
   final _db = DatabaseHelper();
   final _locationService = LocationService();
@@ -17,6 +21,14 @@ class HomeViewModel extends ChangeNotifier {
   LatLng? ubicacionActual;
   LatLng? destinoSeleccionado;
   bool cargando = true;
+
+  // ⭐ NUEVO: estado que antes vivía en HomeView
+  bool switchModo = false;                // Modo Transporte (false) / Taxi (true)
+  bool mostrandoMensaje = true;          // Mensaje "Modo Taxi / Modo Transporte"
+  double zoomActual = 13;                // Zoom actual del mapa
+  String textoBusqueda = "Buscar";       // Texto de la barra de búsqueda
+  String? rutaSeleccionadaId;            // Ruta seleccionada en el dropdown
+  Set<Circle> circulos = {};             // Círculos de paradas / sitios
 
   HomeViewModel() {
     inicializarMapa();
@@ -37,6 +49,203 @@ class HomeViewModel extends ChangeNotifier {
     }
 
     cargando = false;
+    notifyListeners();
+  }
+
+  // ⭐ NUEVO: inicializar la pantalla Home (ubicación + contenido + mensaje de modo)
+  Future<void> inicializarHome() async {
+    await inicializarMapa();      // reutilizamos lo que ya tenías
+    await cargarContenido();      // carga paradas o sitios según el modo
+
+    mostrandoMensaje = true;
+    notifyListeners();
+
+    Future.delayed(const Duration(seconds: 3), () {
+      mostrandoMensaje = false;
+      notifyListeners();
+    });
+  }
+
+  // ⭐ NUEVO: se llama cuando se mueve la cámara (para recalcular qué mostrar)
+  Future<void> onCameraMove(double nuevoZoom) async {
+    zoomActual = nuevoZoom;
+    await cargarContenido();
+  }
+
+  // ⭐ NUEVO: cargar contenido según el modo actual
+  Future<void> cargarContenido() async {
+    if (switchModo) {
+      await _cargarSitiosOptimizado();
+    } else {
+      await _cargarParadasOptimizado();
+    }
+  }
+
+  // ⭐ NUEVO: cargar paradas de forma optimizada según zoom
+  Future<void> _cargarParadasOptimizado() async {
+    final todasParadas = await _db.obtenerParadas();
+
+    Set<Circle> visibles = {};
+    int step;
+
+    if (zoomActual < 11) {
+      step = 25;
+    } else if (zoomActual < 13) {
+      step = 10;
+    } else if (zoomActual < 15) {
+      step = 5;
+    } else {
+      step = 1;
+    }
+
+    for (int i = 0; i < todasParadas.length; i += step) {
+      final p = todasParadas[i];
+      visibles.add(
+        Circle(
+          circleId: CircleId('parada_${p.idParada}'),
+          center: LatLng(p.latitud, p.longitud),
+          radius: 15,
+          fillColor: const Color(0xFF137fec).withOpacity(0.5),
+          strokeColor: Colors.blueAccent,
+          strokeWidth: 1,
+          // ❗ Aquí ya no usamos ScaffoldMessenger, eso se manejará en la vista
+        ),
+      );
+    }
+
+    circulos = visibles;
+    notifyListeners();
+  }
+
+  // ⭐ NUEVO: cargar sitios de taxi de forma optimizada según zoom
+  Future<void> _cargarSitiosOptimizado() async {
+    final todosSitios = await _db.obtenerSitios();
+
+    Set<Circle> visibles = {};
+    int step;
+
+    if (zoomActual < 11) {
+      step = 25;
+    } else if (zoomActual < 13) {
+      step = 10;
+    } else if (zoomActual < 15) {
+      step = 5;
+    } else {
+      step = 1;
+    }
+
+    for (int i = 0; i < todosSitios.length; i += step) {
+      final s = todosSitios[i];
+      visibles.add(
+        Circle(
+          circleId: CircleId('sitio_${s.idSitio}'),
+          center: LatLng(s.latitud, s.longitud),
+          radius: 15,
+          fillColor:
+              const Color.fromARGB(255, 236, 76, 76).withOpacity(0.5),
+          strokeColor: const Color.fromARGB(255, 255, 44, 44),
+          strokeWidth: 1,
+        ),
+      );
+    }
+
+    circulos = visibles;
+    notifyListeners();
+  }
+
+  // ⭐ NUEVO: cambiar entre modo transporte público y taxi
+  Future<void> toggleModo({
+    required RecorridoViewModel recorridoVM,
+    required SitioViewModel sitioVM,
+  }) async {
+    // Limpiar estado en otros ViewModels
+    recorridoVM.resetearTodo();
+    recorridoVM.limpiarRutaCaminando();
+    recorridoVM.ocultarPopupRutaCaminando();
+    sitioVM.limpiarMapaTaxi();
+
+    // Limpiar estado local
+    rutaSeleccionadaId = null;
+    textoBusqueda = "Buscar";
+    destinoSeleccionado = null;
+    circulos.clear();
+
+    // Cambiar modo
+    switchModo = !switchModo;
+
+    // Mostrar mensaje de modo
+    mostrandoMensaje = true;
+    notifyListeners();
+
+    // Recargar contenido según el modo
+    await cargarContenido();
+
+    // Ocultar mensaje después de 3s
+    Future.delayed(const Duration(seconds: 3), () {
+      mostrandoMensaje = false;
+      notifyListeners();
+    });
+  }
+
+  // ⭐ NUEVO: marcar destino (fusiona lógica de CU-1 y CU-2 que tenías en HomeView)
+  Future<void> marcarDestino(
+    LatLng destino, {
+    required RecorridoViewModel recorridoVM,
+    required SitioViewModel sitioVM,
+    required String apiKey,
+  }) async {
+    // Asegurarnos de tener ubicación actual
+    if (ubicacionActual == null) {
+      final loc = await _locationService.getCurrentLocation();
+      if (loc != null) {
+        ubicacionActual = LatLng(loc.latitude, loc.longitude);
+      }
+    }
+
+    if (ubicacionActual == null) {
+      debugPrint("No se pudo obtener la ubicación actual");
+      return;
+    }
+
+    if (switchModo) {
+      // 🚕 Modo Taxi
+      await sitioVM.cargarSitios();
+      final sitio = await sitioVM.obtenerSitioMasCercano(ubicacionActual!);
+
+      if (sitio != null) {
+        // 🚶 Primero: ruta caminando al sitio
+        await sitioVM.calcularRutaCaminandoAlSitio(
+          origen: ubicacionActual!,
+          apiKey: apiKey,
+        );
+
+        // 🚕 Luego: ruta taxi desde el sitio al destino
+        await sitioVM.calcularRutaTaxi(
+          origen: LatLng(sitio.latitud, sitio.longitud),
+          destino: destino,
+          apiKey: apiKey,
+        );
+      }
+    } else {
+      // 🚌 Modo Transporte público
+      recorridoVM.marcarDestino(destino);
+      await recorridoVM.buscarRutasCercanas(destino);
+    }
+
+    destinoSeleccionado = destino;
+    textoBusqueda = "Destino seleccionado";
+    notifyListeners();
+  }
+
+  // ⭐ NUEVO: limpiar selección cuando cierras el dropdown de rutas
+  void limpiarSeleccionRutas(RecorridoViewModel recorridoVM) {
+    recorridoVM.resetearTodo();
+    recorridoVM.limpiarRutaCaminando();
+    recorridoVM.ocultarPopupRutaCaminando();
+
+    rutaSeleccionadaId = null;
+    textoBusqueda = "Buscar";
+    destinoSeleccionado = null;
     notifyListeners();
   }
 
@@ -103,21 +312,22 @@ class HomeViewModel extends ChangeNotifier {
     ];
 
     marcadores = {
-    Marker(
-      markerId: const MarkerId("parada_destino"),
-      position: LatLng(paradaDestino.latitud, paradaDestino.longitud),
-      infoWindow: InfoWindow(
-        title: "🚏 Parada cercana destino",
-        snippet: "${paradaDestino.nombre} (ID: ${paradaDestino.idParada})",
+      Marker(
+        markerId: const MarkerId("parada_destino"),
+        position: LatLng(paradaDestino.latitud, paradaDestino.longitud),
+        infoWindow: InfoWindow(
+          title: "🚏 Parada cercana destino",
+          snippet: "${paradaDestino.nombre} (ID: ${paradaDestino.idParada})",
+        ),
+        icon: BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueOrange),
       ),
-      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
-    ),
-    Marker(
-      markerId: const MarkerId("destino"),
-      position: destino,
-      infoWindow: const InfoWindow(title: "🎯 Destino"),
-    ),
-  };
+      const Marker(
+        markerId: MarkerId("destino"),
+        position: LatLng(0, 0), // ⚠️ OJO: aquí tú ya usas "destino" en tu implementación real
+        infoWindow: InfoWindow(title: "🎯 Destino"),
+      ),
+    };
 
     polylines = {
       Polyline(
@@ -132,25 +342,24 @@ class HomeViewModel extends ChangeNotifier {
 
   //Taxis
   // 🔸 Encuentra el sitio más cercano a la ubicación actual
-Future<SitioModel?> obtenerSitioMasCercano() async {
-  if (ubicacionActual == null) return null;
+  Future<SitioModel?> obtenerSitioMasCercano() async {
+    if (ubicacionActual == null) return null;
 
-  final sitios = await _db.obtenerSitios();
-  SitioModel? masCercano;
-  double menorDistancia = double.infinity;
+    final sitios = await _db.obtenerSitios();
+    SitioModel? masCercano;
+    double menorDistancia = double.infinity;
 
-  for (var s in sitios) {
-    final distancia = _distanciaEntre(
-      ubicacionActual!,
-      LatLng(s.latitud, s.longitud),
-    );
-    if (distancia < menorDistancia) {
-      menorDistancia = distancia;
-      masCercano = s;
+    for (var s in sitios) {
+      final distancia = _distanciaEntre(
+        ubicacionActual!,
+        LatLng(s.latitud, s.longitud),
+      );
+      if (distancia < menorDistancia) {
+        menorDistancia = distancia;
+        masCercano = s;
+      }
     }
+
+    return masCercano;
   }
-
-  return masCercano;
-}
-
 }
