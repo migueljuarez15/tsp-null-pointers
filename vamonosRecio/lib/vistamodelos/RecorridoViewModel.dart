@@ -8,7 +8,6 @@ import 'package:http/http.dart' as http;
 import 'package:vamonos_recio/modelos/RutaModel.dart';
 import '../modelos/ParadaModel.dart';
 import '../services/DatabaseHelper.dart';
-import '../services/OsrmService.dart';
 
 class RecorridoViewModel extends ChangeNotifier {
   final DatabaseHelper _db = DatabaseHelper();
@@ -54,7 +53,7 @@ class RecorridoViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 🚍 Dibuja una ruta completa desde la BD (RECORRIDO)
+  /// 🚍 Dibuja una ruta completa leyendo la polyline precomputada desde la BD (RUTA.POLYLINE)
   Future<void> dibujarRutaDesdeBD(int idRuta) async {
     _cargando = true;
     notifyListeners();
@@ -63,10 +62,13 @@ class RecorridoViewModel extends ChangeNotifier {
       // 🔹 Limpia polyline y marcadores anteriores (excepto el destino)
       _polylines.clear();
       _marcadores.removeWhere(
-          (m) => m.markerId.value != "destino_buscado"); // limpia todo menos destino
+        (m) => m.markerId.value != "destino_buscado",
+      );
 
-      // 🔹 Consulta las paradas de la ruta ordenadas
-      final List<ParadaModel> paradas = await _db.obtenerParadasPorRuta(idRuta);
+      // 🔹 Consulta las paradas de la ruta ordenadas (para marcadores)
+      final List<ParadaModel> paradas =
+          await _db.obtenerParadasPorRuta(idRuta);
+
       if (paradas.isEmpty) {
         debugPrint('⚠️ No se encontraron paradas para la ruta $idRuta');
         _cargando = false;
@@ -74,31 +76,40 @@ class RecorridoViewModel extends ChangeNotifier {
         return;
       }
 
-      // 🔹 Agrega marcadores solo de esa ruta
+      // 🔹 Agrega marcadores de paradas
       _marcadores.addAll(paradas.map((p) {
         return Marker(
           markerId: MarkerId('parada_${p.idParada}'),
           position: LatLng(p.latitud, p.longitud),
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueAzure,
+          ),
           infoWindow: InfoWindow(title: p.nombre),
         );
       }));
 
-      // 🔹 Construye la polyline completa uniendo cada par de paradas consecutivas
-      List<LatLng> rutaCompleta = [];
-      for (int i = 0; i < paradas.length - 1; i++) {
-        final origen = LatLng(paradas[i].latitud, paradas[i].longitud);
-        final destino = LatLng(paradas[i + 1].latitud, paradas[i + 1].longitud);
-        final segmento = await OSRMService.obtenerRutaOSRM(origen, destino);
+      // 🔹 Leer polyline precomputada desde la tabla RUTA
+      final polylineJson = await _db.obtenerPolylineRuta(idRuta);
 
-        if (segmento.isNotEmpty) {
-          if (rutaCompleta.isNotEmpty) segmento.removeAt(0);
-          rutaCompleta.addAll(segmento);
-        }
+      List<LatLng> rutaCompleta = [];
+
+      if (polylineJson != null) {
+        final List<dynamic> data = jsonDecode(polylineJson);
+        rutaCompleta = data.map<LatLng>((p) {
+          return LatLng(
+            (p['lat'] as num).toDouble(),
+            (p['lng'] as num).toDouble(),
+          );
+        }).toList();
+      } else {
+        // (Opcional) Fallback: si aún no hay polyline guardada, puedes usar OSRM
+        debugPrint(
+            '⚠️ La ruta $idRuta no tiene POLYLINE guardada. Considera correr el precompute.');
       }
 
       if (rutaCompleta.isEmpty) {
-        debugPrint('⚠️ No se pudo construir la polyline para la ruta $idRuta');
+        debugPrint(
+            '⚠️ No se pudo construir la polyline para la ruta $idRuta');
         _cargando = false;
         notifyListeners();
         return;
@@ -293,11 +304,14 @@ class RecorridoViewModel extends ChangeNotifier {
         final route = data['routes'][0];
         final leg = route['legs'][0];
 
-        // 🟢 Decodificar polyline
-        final decodedPoints =
-            PolylinePoints.decodePolyline(route['overview_polyline']['points']);
-        final List<LatLng> polylineCoords =
-            decodedPoints.map((p) => LatLng(p.latitude, p.longitude)).toList();
+        // 🟢 Decodificar polyline con PolylinePoints v3
+        final polylinePoints = PolylinePoints(apiKey: apiKey);
+        final decodedPoints = PolylinePoints.decodePolyline(route['overview_polyline']['points']);
+
+        final List<LatLng> polylineCoords = decodedPoints
+          .map((p) => LatLng(p.latitude, p.longitude))
+          .toList();
+
 
         _rutaCaminando.add(Polyline(
           polylineId: const PolylineId("rutaCaminando"),

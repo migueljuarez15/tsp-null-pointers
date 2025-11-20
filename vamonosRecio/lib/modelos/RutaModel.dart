@@ -4,6 +4,7 @@ class RutaModel {
   final String color;
   final String horario;
   final String tiempoEstimadoEspera;
+  final String polyline; // NUEVO
 
   RutaModel({
     this.idRuta,
@@ -11,6 +12,7 @@ class RutaModel {
     required this.color,
     required this.horario,
     required this.tiempoEstimadoEspera,
+    required this.polyline,
   });
 
   // Convierte un objeto Ruta → Mapa (para guardar en SQLite)
@@ -21,6 +23,7 @@ class RutaModel {
       'COLOR': color,
       'HORARIO': horario,
       'TIEMPO_ESTIMADO_ESPERA': tiempoEstimadoEspera,
+      'POLYLINE': polyline,
     };
   }
 
@@ -32,6 +35,7 @@ class RutaModel {
       color: map['COLOR'],
       horario: map['HORARIO'],
       tiempoEstimadoEspera: map['TIEMPO_ESTIMADO_ESPERA'],
+      polyline: (map['POLYLINE'] ?? '') as String, // 👈 si es NULL, queda ''
     );
   }
 }

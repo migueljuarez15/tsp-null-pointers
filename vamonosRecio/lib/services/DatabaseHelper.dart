@@ -25,7 +25,7 @@ class DatabaseHelper {
 
   Future<Database> _initDatabase() async {
     // 🔹 Nombre con el que se copiará internamente en el dispositivo
-    const String dbName = 'vamonosRecio.db';
+    const String dbName = 'vamonosRecioV2.db';
 
     // 🔹 Ruta donde se guardará la BD en el dispositivo
     final dbPath = await getDatabasesPath();
@@ -38,7 +38,7 @@ class DatabaseHelper {
       print('📦 Copiando base de datos desde assets...');
 
       // Ruta de la BD dentro de assets
-      final data = await rootBundle.load('assets/database/vamonosRecio.db');
+      final data = await rootBundle.load('assets/database/vamonosRecioV2.db');
       final bytes = data.buffer.asUint8List();
 
       // Crear directorio si no existe
@@ -144,4 +144,68 @@ class DatabaseHelper {
       return [];
     }
   }
+
+  /// Regresa las paradas de una ruta en el orden definido en RECORRIDO
+  Future<List<ParadaModel>> obtenerParadasDeRuta(int idRuta) async {
+    final db = await database;
+
+    final result = await db.rawQuery('''
+      SELECT P.ID_PARADA, P.NOMBRE, P.LATITUD, P.LONGITUD
+      FROM RECORRIDO R
+      JOIN PARADAS P ON P.ID_PARADA = R.ID_PARADA
+      WHERE R.ID_RUTA = ?
+      ORDER BY R.ORDEN ASC
+    ''', [idRuta]);
+
+    return result.map((m) => ParadaModel.fromMap(m)).toList();
+  }
+
+  /// Guarda/actualiza la polyline de una ruta
+  Future<void> guardarPolylineRuta(int idRuta, String polyline) async {
+    final db = await database;
+    await db.update(
+      'RUTA',
+      {'POLYLINE': polyline},
+      where: 'ID_RUTA = ?',
+      whereArgs: [idRuta],
+    );
+  }
+
+  /// Obtiene la polyline de una ruta (puede regresar null)
+  Future<String?> obtenerPolylineRuta(int idRuta) async {
+    final db = await database;
+
+    final result = await db.query(
+      'RUTA',
+      columns: ['POLYLINE'],
+      where: 'ID_RUTA = ?',
+      whereArgs: [idRuta],
+      limit: 1,
+    );
+
+    if (result.isEmpty) return null;
+    return result.first['POLYLINE'] as String?;
+  }
+
+  /// 🔍 DEBUG: Imprime el tamaño de las polylines guardadas en tabla RUTA
+Future<void> debugImprimirTamanosPolylines() async {
+  final db = await database;
+
+  final result = await db.rawQuery('''
+    SELECT ID_RUTA, 
+           CASE 
+             WHEN POLYLINE IS NULL THEN 'NULL'
+             WHEN POLYLINE = '' THEN 'VACÍO'
+             ELSE LENGTH(POLYLINE) || ' bytes'
+           END AS TAMANO
+    FROM RUTA
+    ORDER BY ID_RUTA;
+  ''');
+
+  print("📌 ====== DEBUG POLYLINES ======");
+  for (final row in result) {
+    print("Ruta ${row['ID_RUTA']} → Polyline: ${row['TAMANO']}");
+  }
+  print("📌 =============================");
+}
 }
