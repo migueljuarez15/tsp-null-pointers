@@ -29,6 +29,7 @@ class HomeViewModel extends ChangeNotifier {
   String textoBusqueda = "Buscar";       // Texto de la barra de búsqueda
   String? rutaSeleccionadaId;            // Ruta seleccionada en el dropdown
   Set<Circle> circulos = {};             // Círculos de paradas / sitios
+  bool ocultarParadas = false; // cuando es true, no se dibujan paradas (circles)
 
   HomeViewModel() {
     inicializarMapa();
@@ -163,6 +164,7 @@ class HomeViewModel extends ChangeNotifier {
     recorridoVM.limpiarRutaCaminando();
     recorridoVM.ocultarPopupRutaCaminando();
     sitioVM.limpiarMapaTaxi();
+    ocultarParadas = false;
 
     // Limpiar estado local
     rutaSeleccionadaId = null;
@@ -242,6 +244,7 @@ class HomeViewModel extends ChangeNotifier {
     recorridoVM.resetearTodo();
     recorridoVM.limpiarRutaCaminando();
     recorridoVM.ocultarPopupRutaCaminando();
+    ocultarParadas = false;
 
     rutaSeleccionadaId = null;
     textoBusqueda = "Buscar";
@@ -361,5 +364,11 @@ class HomeViewModel extends ChangeNotifier {
     }
 
     return masCercano;
+  }
+
+  void setOcultarParadas(bool valor) {
+    if (ocultarParadas == valor) return;
+    ocultarParadas = valor;
+    notifyListeners();
   }
 }
