@@ -30,6 +30,7 @@ class HomeViewModel extends ChangeNotifier {
   String? rutaSeleccionadaId;            // Ruta seleccionada en el dropdown
   Set<Circle> circulos = {};             // Círculos de paradas / sitios
   bool ocultarParadas = false; // cuando es true, no se dibujan paradas (circles)
+  bool ocultarSitios = false;  // cuando es true, no se dibujan sitios de taxi
 
   HomeViewModel() {
     inicializarMapa();
@@ -165,6 +166,7 @@ class HomeViewModel extends ChangeNotifier {
     recorridoVM.ocultarPopupRutaCaminando();
     sitioVM.limpiarMapaTaxi();
     ocultarParadas = false;
+    ocultarSitios = false;
 
     // Limpiar estado local
     rutaSeleccionadaId = null;
@@ -369,6 +371,12 @@ class HomeViewModel extends ChangeNotifier {
   void setOcultarParadas(bool valor) {
     if (ocultarParadas == valor) return;
     ocultarParadas = valor;
+    notifyListeners();
+  }
+
+  void setOcultarSitios(bool valor) {
+    if (ocultarSitios == valor) return;
+    ocultarSitios = valor;
     notifyListeners();
   }
 }
