@@ -1,19 +1,25 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
+
 import 'package:vamonos_recio/modelos/SitioModel.dart';
 import 'package:vamonos_recio/services/DatabaseHelper.dart';
+import 'package:vamonos_recio/services/LocationService.dart';
 
 class SitioViewModel extends ChangeNotifier {
   final DatabaseHelper _db = DatabaseHelper();
+  final LocationService _locationService = LocationService();
 
   List<SitioModel> _sitios = [];
   SitioModel? _sitioMasCercano;
   LatLng? _ubicacionActual;
   LatLng? _destinoSeleccionado;
+
   bool mostrarPopupTaxiCaminando = false;
   String? tiempoCaminando;
   String? distanciaCaminando;
@@ -21,11 +27,20 @@ class SitioViewModel extends ChangeNotifier {
   Set<Marker> _markers = {};
   Set<Polyline> _polylineTaxi = {};
   Set<Polyline> _polylineCaminando = {};
+  List<LatLng> _polylineCaminandoPuntos = [];
 
   String? _tiempoEstimado;
   String? _distanciaAprox;
 
   bool _cargando = false;
+
+  // 🔁 Seguimiento en vivo CU-9
+  Timer? _timerSeguimientoTaxi;
+  bool _seguimientoTaxiActivo = false;
+  bool get seguimientoTaxiActivo => _seguimientoTaxiActivo;
+
+  bool _llegoAutomaticamenteTaxi = false;
+  bool get llegoAutomaticamenteTaxi => _llegoAutomaticamenteTaxi;
 
   // 📍 Getters públicos
   List<SitioModel> get sitios => _sitios;
@@ -35,6 +50,7 @@ class SitioViewModel extends ChangeNotifier {
   String? get tiempoEstimado => _tiempoEstimado;
   String? get distanciaAprox => _distanciaAprox;
   bool get cargando => _cargando;
+  LatLng? get ubicacionActual => _ubicacionActual;
 
   // 📍 Setters públicos
   void setUbicacionActual(LatLng ubicacion) {
@@ -112,41 +128,50 @@ class SitioViewModel extends ChangeNotifier {
         final leg = route['legs'][0];
 
         // 🟡 Decodificar polyline
-        final decodedPoints = PolylinePoints
-            .decodePolyline(route['overview_polyline']['points']);
-        final List<LatLng> polylineCoords = decodedPoints
-            .map((p) => LatLng(p.latitude, p.longitude))
-            .toList();
+        final decodedPoints =
+            PolylinePoints.decodePolyline(route['overview_polyline']['points']);
+        final List<LatLng> polylineCoords =
+            decodedPoints.map((p) => LatLng(p.latitude, p.longitude)).toList();
 
-        _polylineTaxi.add(Polyline(
-          polylineId: const PolylineId("taxiRoute"),
-          color: const Color.fromARGB(255, 255, 96, 96),
-          width: 6,
-          points: polylineCoords,
-        ));
+        _polylineTaxi.add(
+          Polyline(
+            polylineId: const PolylineId("taxiRoute"),
+            color: const Color.fromARGB(255, 255, 96, 96),
+            width: 6,
+            points: polylineCoords,
+          ),
+        );
 
         // 🟢 Marcadores
         if (_sitioMasCercano != null) {
-          _markers.add(Marker(
-            markerId: const MarkerId("sitioMasCercano"),
-            position:
-                LatLng(_sitioMasCercano!.latitud, _sitioMasCercano!.longitud),
-            icon: BitmapDescriptor.defaultMarkerWithHue(
-                BitmapDescriptor.hueBlue),
-            infoWindow: InfoWindow(
-              title: _sitioMasCercano!.nombre,
-              snippet: "Sitio más cercano",
+          _markers.add(
+            Marker(
+              markerId: const MarkerId("sitioMasCercano"),
+              position: LatLng(
+                _sitioMasCercano!.latitud,
+                _sitioMasCercano!.longitud,
+              ),
+              icon: BitmapDescriptor.defaultMarkerWithHue(
+                BitmapDescriptor.hueBlue,
+              ),
+              infoWindow: InfoWindow(
+                title: _sitioMasCercano!.nombre,
+                snippet: "Sitio más cercano",
+              ),
             ),
-          ));
+          );
         }
 
-        _markers.add(Marker(
-          markerId: const MarkerId("destino"),
-          position: destino,
-          icon: BitmapDescriptor.defaultMarkerWithHue(
-              BitmapDescriptor.hueRed),
-          infoWindow: const InfoWindow(title: "Destino seleccionado"),
-        ));
+        _markers.add(
+          Marker(
+            markerId: const MarkerId("destino"),
+            position: destino,
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+              BitmapDescriptor.hueRed,
+            ),
+            infoWindow: const InfoWindow(title: "Destino seleccionado"),
+          ),
+        );
 
         // ⏱ ETA y distancia
         _tiempoEstimado = leg['duration']['text'];
@@ -168,12 +193,21 @@ class SitioViewModel extends ChangeNotifier {
   void limpiarMapaTaxi() {
     _markers.clear();
     _polylineCaminando.clear();
+    _polylineCaminandoPuntos.clear();
     _polylineTaxi.clear();
     _tiempoEstimado = null;
     _distanciaAprox = null;
     _sitioMasCercano = null;
     _ubicacionActual = null;
     _destinoSeleccionado = null;
+
+    _timerSeguimientoTaxi?.cancel();
+    _timerSeguimientoTaxi = null;
+    _seguimientoTaxiActivo = false;
+    _llegoAutomaticamenteTaxi = false;
+    tiempoCaminando = null;
+    distanciaCaminando = null;
+
     notifyListeners();
   }
 
@@ -190,10 +224,14 @@ class SitioViewModel extends ChangeNotifier {
             sin(dLng / 2) *
             sin(dLng / 2);
     final c = 2 * atan2(sqrt(a), sqrt(1 - a));
-    return R * c;
+    return R * c; // km
   }
 
   double _toRadians(double degree) => degree * (pi / 180);
+
+  double _distanciaMetros(LatLng a, LatLng b) {
+    return _calcularDistancia(a, b) * 1000.0;
+  }
 
   // --------------------------------------------------
   // 5️⃣ Calcular ruta a pie hacia el sitio más cercano
@@ -204,8 +242,7 @@ class SitioViewModel extends ChangeNotifier {
   }) async {
     try {
       _cargando = true;
-      _markers.clear();
-      _polylineCaminando.clear(); // solo limpia rutas caminando
+      _polylineCaminando.clear();
       notifyListeners();
 
       // Verificamos que haya sitio más cercano
@@ -217,7 +254,10 @@ class SitioViewModel extends ChangeNotifier {
         }
       }
 
-      final destino = LatLng(_sitioMasCercano!.latitud, _sitioMasCercano!.longitud);
+      final destino = LatLng(
+        _sitioMasCercano!.latitud,
+        _sitioMasCercano!.longitud,
+      );
 
       final url = Uri.parse(
         'https://maps.googleapis.com/maps/api/directions/json?'
@@ -235,36 +275,50 @@ class SitioViewModel extends ChangeNotifier {
         final leg = route['legs'][0];
 
         // 🔵 Decodificar polyline
-        final decodedPoints = PolylinePoints.decodePolyline(route['overview_polyline']['points']);
-        final List<LatLng> coords = decodedPoints
-            .map((p) => LatLng(p.latitude, p.longitude))
-            .toList();
+        final decodedPoints =
+            PolylinePoints.decodePolyline(route['overview_polyline']['points']);
+        final List<LatLng> coords =
+            decodedPoints.map((p) => LatLng(p.latitude, p.longitude)).toList();
 
-        _polylineCaminando.add(Polyline(
-          polylineId: PolylineId("walkingToTaxiSite_${DateTime.now().millisecondsSinceEpoch}"),
-          color: Colors.blueAccent,
-          width: 5,
-          patterns: [PatternItem.dash(20), PatternItem.gap(10)],
-          points: coords,
-        ));
+        // 👉 Guardamos todos los puntos para poder "consumir" la ruta
+        _polylineCaminandoPuntos = coords;
 
-        // 🟢 Marcadores
-        _markers.add(Marker(
-          markerId: const MarkerId("origen"),
-          position: origen,
-          infoWindow: const InfoWindow(title: "Tú estás aquí"),
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-        ));
-
-        _markers.add(Marker(
-          markerId: const MarkerId("sitioMasCercano"),
-          position: destino,
-          infoWindow: InfoWindow(
-            title: _sitioMasCercano!.nombre,
-            snippet: "Sitio más cercano",
+        _polylineCaminando.clear();
+        _polylineCaminando.add(
+          Polyline(
+            polylineId: const PolylineId("walkingToTaxiSite"),
+            color: Colors.blueAccent,
+            width: 5,
+            patterns: [PatternItem.dash(20), PatternItem.gap(10)],
+            points: coords,
           ),
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-        ));
+        );
+
+        // 🟢 Marcadores (no los limpiamos para no borrar marca del sitio, etc)
+        _markers.add(
+          Marker(
+            markerId: const MarkerId("origenCaminandoTaxi"),
+            position: origen,
+            infoWindow: const InfoWindow(title: "Tú estás aquí"),
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+              BitmapDescriptor.hueAzure,
+            ),
+          ),
+        );
+
+        _markers.add(
+          Marker(
+            markerId: const MarkerId("sitioMasCercanoCaminando"),
+            position: destino,
+            infoWindow: InfoWindow(
+              title: _sitioMasCercano!.nombre,
+              snippet: "Sitio más cercano",
+            ),
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+              BitmapDescriptor.hueGreen,
+            ),
+          ),
+        );
 
         // ⏱ ETA y distancia
         tiempoCaminando = leg['duration']['text'];
@@ -282,6 +336,145 @@ class SitioViewModel extends ChangeNotifier {
     }
   }
 
+  /// 🔄 Actualiza la polyline de caminata mostrando solo el tramo restante
+  void _actualizarPolylineTaxiConProgreso() {
+    if (_ubicacionActual == null || _polylineCaminandoPuntos.isEmpty) return;
+
+    int indexMasCercano = 0;
+    double minDist = double.infinity;
+
+    for (int i = 0; i < _polylineCaminandoPuntos.length; i++) {
+      final d =
+          _distanciaMetros(_ubicacionActual!, _polylineCaminandoPuntos[i]);
+      if (d < minDist) {
+        minDist = d;
+        indexMasCercano = i;
+      }
+    }
+
+    final restantes = _polylineCaminandoPuntos.sublist(indexMasCercano);
+
+    _polylineCaminando.clear();
+
+    if (restantes.length > 1) {
+      _polylineCaminando.add(
+        Polyline(
+          polylineId: const PolylineId("walkingToTaxiSite"),
+          color: Colors.blueAccent,
+          width: 5,
+          patterns: [PatternItem.dash(20), PatternItem.gap(10)],
+          points: restantes,
+        ),
+      );
+    }
+  }
+
+  /// 🔁 Recalcula la ruta caminando desde la posición actual hasta el sitio
+  Future<void> _recalcularRutaCaminandoDesdePosicionActual(
+    String apiKey,
+    LatLng destinoSitio,
+  ) async {
+    if (_ubicacionActual == null) return;
+
+    await calcularRutaCaminandoAlSitio(
+      origen: _ubicacionActual!,
+      apiKey: apiKey,
+    );
+  }
+
+  // ▶️ Iniciar seguimiento a pie hacia el sitio de taxis (CU-9)
+  Future<void> iniciarSeguimientoAPieSitioTaxi({
+    required String apiKey,
+  }) async {
+    if (_sitioMasCercano == null) {
+      debugPrint("⚠️ No hay sitio más cercano definido para seguimiento.");
+      return;
+    }
+
+    _seguimientoTaxiActivo = true;
+    _llegoAutomaticamenteTaxi = false;
+    notifyListeners();
+
+    // Ubicación inicial
+    final posInicial = await _locationService.getCurrentLocation();
+    if (posInicial != null) {
+      _ubicacionActual = LatLng(posInicial.latitude, posInicial.longitude);
+    }
+
+    final destinoSitio = LatLng(
+      _sitioMasCercano!.latitud,
+      _sitioMasCercano!.longitud,
+    );
+
+    _timerSeguimientoTaxi?.cancel();
+
+    _timerSeguimientoTaxi = Timer.periodic(
+      const Duration(seconds: 2),
+      (timer) async {
+        if (!_seguimientoTaxiActivo) return;
+
+        final pos = await _locationService.getCurrentLocation();
+        if (!_seguimientoTaxiActivo) return;
+        if (pos == null) return;
+
+        _ubicacionActual = LatLng(pos.latitude, pos.longitude);
+
+        // Distancia directa al sitio
+        final distMetros =
+            _distanciaMetros(_ubicacionActual!, destinoSitio);
+        distanciaCaminando = "${distMetros.toStringAsFixed(0)} m";
+
+        // Tiempo estimado (1.4 m/s ≈ 5 km/h)
+        const velocidadMedia = 1.4;
+        final segundos = distMetros / velocidadMedia;
+        final minutos = (segundos / 60).round();
+        tiempoCaminando = "$minutos min";
+
+        // 1️⃣ Consumir polyline si vamos sobre la ruta
+        if (_polylineCaminandoPuntos.isNotEmpty) {
+          final distALinea = _distanciaMetros(
+            _ubicacionActual!,
+            _polylineCaminandoPuntos.first,
+          );
+
+          // 2️⃣ Desvío fuerte de la ruta (> 30 m): recalcular
+          if (distALinea > 30) {
+            await _recalcularRutaCaminandoDesdePosicionActual(
+              apiKey,
+              destinoSitio,
+            );
+          } else {
+            _actualizarPolylineTaxiConProgreso();
+          }
+        }
+
+        // 3️⃣ Llegada automática (≤ 5 m)
+        if (distMetros <= 5) {
+          debugPrint("✅ Llegaste al sitio de taxis más cercano.");
+          await detenerSeguimientoAPieSitioTaxi(porLlegadaAuto: true);
+        }
+
+        notifyListeners();
+      },
+    );
+  }
+
+  /// ⏹ Detener seguimiento a pie (CU-9)
+  Future<void> detenerSeguimientoAPieSitioTaxi({
+    bool porLlegadaAuto = false,
+  }) async {
+    _timerSeguimientoTaxi?.cancel();
+    _timerSeguimientoTaxi = null;
+
+    _seguimientoTaxiActivo = false;
+
+    if (porLlegadaAuto) {
+      _llegoAutomaticamenteTaxi = true;
+    }
+
+    notifyListeners();
+  }
+
   void mostrarPopupRutaCaminandoTaxi() {
     mostrarPopupTaxiCaminando = true;
     notifyListeners();
@@ -292,10 +485,25 @@ class SitioViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// ❌ Limpia solo la ruta caminando al sitio (no todo el mapa)
   void limpiarRutaCaminandoTaxi() {
-    polylines.removeWhere((p) => p.polylineId.value == 'ruta_caminando_taxi');
+    _polylineCaminando.clear();
+    _polylineCaminandoPuntos.clear();
     tiempoCaminando = null;
     distanciaCaminando = null;
+
+    _timerSeguimientoTaxi?.cancel();
+    _timerSeguimientoTaxi = null;
+    _seguimientoTaxiActivo = false;
+    _llegoAutomaticamenteTaxi = false;
+
+    notifyListeners();
+  }
+
+  /// Marca que ya se mostró el diálogo de llegada al sitio
+  void marcarDialogoLlegadaTaxiMostrado() {
+    if (!_llegoAutomaticamenteTaxi) return;
+    _llegoAutomaticamenteTaxi = false;
     notifyListeners();
   }
 }

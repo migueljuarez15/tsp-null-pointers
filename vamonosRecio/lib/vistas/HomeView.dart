@@ -39,7 +39,7 @@ class _HomeViewState extends State<HomeView> {
 
     // ⭐ Hacer que la cámara siga al usuario cuando el seguimiento está activo
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // 📍 Seguir al usuario mientras el seguimiento está activo
+      // 📍 Seguir al usuario mientras el seguimiento CU-8 está activo
       if (recorridoVM.seguimientoActivo &&
           recorridoVM.ubicacionActual != null &&
           mapController != null) {
@@ -48,7 +48,16 @@ class _HomeViewState extends State<HomeView> {
         );
       }
 
-      // ✅ Mostrar diálogo cuando se detectó llegada automática
+      // 📍 Seguir al usuario mientras el seguimiento CU-9 está activo
+      if (sitioVM.seguimientoTaxiActivo &&
+          sitioVM.ubicacionActual != null &&
+          mapController != null) {
+        mapController!.animateCamera(
+          CameraUpdate.newLatLng(sitioVM.ubicacionActual!),
+        );
+      }
+
+      // ✅ Diálogo de llegada automática a la parada (CU-8)
       if (recorridoVM.llegoAutomaticamente) {
         showDialog(
           context: context,
@@ -69,8 +78,31 @@ class _HomeViewState extends State<HomeView> {
           ),
         );
 
-        // Avisar al ViewModel que ya se mostró el diálogo
         recorridoVM.marcarDialogoLlegadaMostrado();
+      }
+
+      // ✅ Diálogo de llegada automática al sitio de taxis (CU-9)
+      if (sitioVM.llegoAutomaticamenteTaxi) {
+        showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text("Has llegado al sitio de taxis"),
+            content: const Text(
+              "Has llegado al sitio de taxis más cercano. "
+              "Ahora puedes abordar tu taxi.",
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+                child: const Text("Aceptar"),
+              ),
+            ],
+          ),
+        );
+
+        sitioVM.marcarDialogoLlegadaTaxiMostrado();
       }
     });
 
@@ -94,8 +126,8 @@ class _HomeViewState extends State<HomeView> {
               polylines: homeVM.switchModo
                   ? sitioVM.polylines
                   : recorridoVM.polylines.union(recorridoVM.rutaCaminando),
-              // DESPUÉS: si estoy en modo rutas y ocultarParadas == true, no dibujo nada
-              circles: (!homeVM.switchModo && homeVM.ocultarParadas) ? <Circle>{} : homeVM.circulos,
+              // OCULTAR PARADAS O SITIOS CUANDO HACE SEGUIMIENTO
+              circles: (!homeVM.switchModo && homeVM.ocultarParadas) ? <Circle>{} : (homeVM.switchModo && homeVM.ocultarSitios) ? <Circle>{} : homeVM.circulos,
               myLocationEnabled: true,
               myLocationButtonEnabled: true,
               zoomControlsEnabled: false,
@@ -811,19 +843,42 @@ class TaxiWalkingPopup extends StatelessWidget {
           _buildInfoRow("Tiempo estimado:", tiempo),
           _buildInfoRow("Distancia:", distancia),
 
-          const SizedBox(height: 16),
+                    const SizedBox(height: 16),
 
-          // 🔘 Botón para iniciar CU-9 (seguimiento a pie)
+          // 🔘 Botón para iniciar / detener CU-9 (seguimiento a pie)
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: () {
-                // Aquí luego conectamos CU-9 (seguimiento en vivo)
-                // context.read<SitioViewModel>().iniciarSeguimientoAPie();
-                // Navigator.of(context).pop();
+              onPressed: () async {
+                final sitioVM = context.read<SitioViewModel>();
+                final homeVM = context.read<HomeViewModel>();
+
+                if (!sitioVM.seguimientoTaxiActivo) {
+                  // Iniciar seguimiento: escondemos círculos de sitios
+                  homeVM.setOcultarSitios(true);
+
+                  await sitioVM.iniciarSeguimientoAPieSitioTaxi(
+                    apiKey: 'AIzaSyDkcaTrFPn2PafDX85VmT-XEKS2qnk7oe8',
+                  );
+                } else {
+                // Detener seguimiento manualmente: volvemos a mostrar sitios
+                await sitioVM.detenerSeguimientoAPieSitioTaxi();
+                homeVM.setOcultarSitios(false);
+                }
+
+                // Volver al mapa
+                Navigator.of(context).pop();
               },
-              icon: const Icon(Icons.play_arrow),
-              label: const Text("Iniciar seguimiento a pie"),
+              icon: Icon(
+                context.watch<SitioViewModel>().seguimientoTaxiActivo
+                ? Icons.stop
+                : Icons.play_arrow,
+              ),
+              label: Text(
+                context.watch<SitioViewModel>().seguimientoTaxiActivo
+                ? "Detener seguimiento"
+                : "Iniciar seguimiento a pie",
+              ),
             ),
           ),
         ],
