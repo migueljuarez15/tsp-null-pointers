@@ -37,6 +37,43 @@ class _HomeViewState extends State<HomeView> {
     final traficoVM = context.watch<TraficoViewModel>();
     final primary = const Color(0xFF137fec);
 
+    // ⭐ Hacer que la cámara siga al usuario cuando el seguimiento está activo
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // 📍 Seguir al usuario mientras el seguimiento está activo
+      if (recorridoVM.seguimientoActivo &&
+          recorridoVM.ubicacionActual != null &&
+          mapController != null) {
+        mapController!.animateCamera(
+          CameraUpdate.newLatLng(recorridoVM.ubicacionActual!),
+        );
+      }
+
+      // ✅ Mostrar diálogo cuando se detectó llegada automática
+      if (recorridoVM.llegoAutomaticamente) {
+        showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text("Has llegado a la parada"),
+            content: const Text(
+              "Has llegado a la parada más cercana. "
+              "Ahora puedes esperar tu transporte.",
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+                child: const Text("Aceptar"),
+              ),
+            ],
+          ),
+        );
+
+        // Avisar al ViewModel que ya se mostró el diálogo
+        recorridoVM.marcarDialogoLlegadaMostrado();
+      }
+    });
+
     return Scaffold(
       body: SafeArea(
         child: Stack(
@@ -57,7 +94,8 @@ class _HomeViewState extends State<HomeView> {
               polylines: homeVM.switchModo
                   ? sitioVM.polylines
                   : recorridoVM.polylines.union(recorridoVM.rutaCaminando),
-              circles: homeVM.circulos,
+              // DESPUÉS: si estoy en modo rutas y ocultarParadas == true, no dibujo nada
+              circles: (!homeVM.switchModo && homeVM.ocultarParadas) ? <Circle>{} : homeVM.circulos,
               myLocationEnabled: true,
               myLocationButtonEnabled: true,
               zoomControlsEnabled: false,
@@ -144,7 +182,10 @@ class _HomeViewState extends State<HomeView> {
               ),
 
             // 🚶‍♂️ Botón para ver info de caminata al sitio de taxi
-            if (homeVM.switchModo && sitioVM.sitioMasCercano != null && sitioVM.tiempoCaminando != null && sitioVM.distanciaCaminando != null)
+            if (homeVM.switchModo &&
+                sitioVM.sitioMasCercano != null &&
+                sitioVM.tiempoCaminando != null &&
+                sitioVM.distanciaCaminando != null)
               Positioned(
                 bottom: 150,
                 left: 0,
@@ -154,7 +195,8 @@ class _HomeViewState extends State<HomeView> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
                       foregroundColor: Colors.black87,
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 24, vertical: 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(999),
                       ),
@@ -165,7 +207,8 @@ class _HomeViewState extends State<HomeView> {
                         context: context,
                         isScrollControlled: false,
                         shape: const RoundedRectangleBorder(
-                          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                          borderRadius:
+                              BorderRadius.vertical(top: Radius.circular(16)),
                         ),
                         builder: (_) => const Padding(
                           padding: EdgeInsets.all(16.0),
@@ -191,7 +234,10 @@ class _HomeViewState extends State<HomeView> {
               ),
 
             // 🚶‍♂️ Botón para ver info de caminata hacia la parada (CU-8)
-            if (!homeVM.switchModo && recorridoVM.paradaMasCercana != null && recorridoVM.tiempoCaminando != null && recorridoVM.distanciaCaminando != null)
+            if (!homeVM.switchModo &&
+                recorridoVM.paradaMasCercana != null &&
+                recorridoVM.tiempoCaminando != null &&
+                recorridoVM.distanciaCaminando != null)
               Positioned(
                 bottom: 150, // ajusta si se empalma con los FAB
                 left: 0,
@@ -201,7 +247,8 @@ class _HomeViewState extends State<HomeView> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
                       foregroundColor: Colors.black87,
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 24, vertical: 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(999),
                       ),
@@ -212,7 +259,8 @@ class _HomeViewState extends State<HomeView> {
                         context: context,
                         isScrollControlled: false,
                         shape: const RoundedRectangleBorder(
-                          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                          borderRadius:
+                              BorderRadius.vertical(top: Radius.circular(16)),
                         ),
                         builder: (_) => const Padding(
                           padding: EdgeInsets.all(16.0),
@@ -381,8 +429,6 @@ class _HomeViewState extends State<HomeView> {
                     await recorridoVM.dibujarRutaDesdeBD(int.parse(valor));
 
                     // 🧭 CU-4: Calcular parada más cercana automáticamente al elegir ruta
-                    // Si no tienes ubicacionActual en HomeViewModel en este momento,
-                    // puedes asegurarte de que ya esté inicializada desde inicializarHome()
                     if (homeVM.ubicacionActual != null) {
                       recorridoVM.setUbicacionActual(
                         homeVM.ubicacionActual!,
@@ -593,6 +639,9 @@ class WalkingInfoPopup extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
+    final seguimientoActivo =
+        context.watch<RecorridoViewModel>().seguimientoActivo;
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -644,18 +693,37 @@ class WalkingInfoPopup extends StatelessWidget {
 
           const SizedBox(height: 16),
 
-          // 🔘 Botón para iniciar CU-8 (seguimiento a pie hacia la parada)
+          // 🔘 Botón para iniciar / detener CU-8 (seguimiento a pie hacia la parada)
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: () {
-                // TODO: aquí luego conectamos CU-8 con live tracking
-                // Ejemplo futuro:
-                // context.read<RecorridoViewModel>().iniciarSeguimientoAPieParada();
-                // Navigator.of(context).pop();
+              onPressed: () async {
+                final vm = context.read<RecorridoViewModel>();
+                final homeVM = context.read<HomeViewModel>();
+
+                if (!vm.seguimientoActivo) {
+                  // 👉 Iniciar seguimiento: escondemos circles de paradas
+                  homeVM.setOcultarParadas(true);
+
+                  await vm.iniciarSeguimientoAPieParada(
+                    apiKey: 'AIzaSyDkcaTrFPn2PafDX85VmT-XEKS2qnk7oe8',
+                  );
+                } else {
+                  await vm.detenerSeguimientoAPie();
+                  homeVM.setOcultarParadas(false);
+                }
+
+                // Volver al mapa
+                Navigator.of(context).pop();
               },
-              icon: const Icon(Icons.play_arrow),
-              label: const Text("Iniciar seguimiento a pie"),
+              icon: Icon(
+                seguimientoActivo ? Icons.stop : Icons.play_arrow,
+              ),
+              label: Text(
+                seguimientoActivo
+                    ? "Detener seguimiento"
+                    : "Iniciar seguimiento a pie",
+              ),
             ),
           ),
         ],
@@ -751,7 +819,6 @@ class TaxiWalkingPopup extends StatelessWidget {
             child: ElevatedButton.icon(
               onPressed: () {
                 // Aquí luego conectamos CU-9 (seguimiento en vivo)
-                // Ejemplo futuro:
                 // context.read<SitioViewModel>().iniciarSeguimientoAPie();
                 // Navigator.of(context).pop();
               },
