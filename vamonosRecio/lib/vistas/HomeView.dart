@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
+import 'package:vamonos_recio/modelos/RutaModel.dart';
 
 import 'package:vamonos_recio/vistamodelos/HomeViewModel.dart';
 import 'package:vamonos_recio/vistamodelos/RecorridoViewModel.dart';
@@ -39,6 +40,15 @@ class _HomeViewState extends State<HomeView> {
 
     // ⭐ Hacer que la cámara siga al usuario cuando el seguimiento está activo
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // 📍 Seguir al usuario mientras el seguimiento CU-6 (ruta en camión) está activo
+      if (recorridoVM.seguimientoRutaActivo && 
+          recorridoVM.ubicacionActual != null && 
+          mapController != null) {
+        mapController!.animateCamera(
+          CameraUpdate.newLatLng(recorridoVM.ubicacionActual!),
+        );
+      }
+
       // 📍 Seguir al usuario mientras el seguimiento CU-8 está activo
       if (recorridoVM.seguimientoActivo &&
           recorridoVM.ubicacionActual != null &&
@@ -58,6 +68,52 @@ class _HomeViewState extends State<HomeView> {
         );
       }
 
+      // ✅ Aviso anticipado CU-6: "Ya casi llegas a tu parada"
+      if (recorridoVM.avisoProximoParada) {
+        showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text("Te estás acercando a tu parada"),
+            content: const Text(
+              "¡Prepárate para bajar! Estás muy cerca de la parada.",
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+                child: const Text("Aceptar"),
+              ),
+            ],
+          ),
+        );
+
+        recorridoVM.marcarAvisoProximoParadaMostrado();
+        }
+
+      // ✅ Diálogo de llegada automática a la parada objetivo (CU-6)
+      if (recorridoVM.llegoAutomaticamenteRuta) {
+        showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text("Has llegado a tu parada"),
+            content: const Text(
+              "Has llegado a la parada cercana a tu destino.",
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+                child: const Text("Aceptar"),
+              ),
+            ],
+          ),
+        );
+
+        recorridoVM.marcarDialogoLlegadaRutaMostrado();
+        }
+
       // ✅ Diálogo de llegada automática al destino del taxi (CU-7)
       if (sitioVM.llegoAutomaticamenteDestinoTaxi) {
         showDialog(
@@ -65,7 +121,7 @@ class _HomeViewState extends State<HomeView> {
           builder: (_) => AlertDialog(
             title: const Text("Has llegado a tu destino"),
             content: const Text(
-              "Has llegado al destino de tu viaje en taxi.",
+              "Has llegado al destino de tu viaje.",
             ),
             actions: [
               TextButton(
@@ -89,7 +145,7 @@ class _HomeViewState extends State<HomeView> {
             title: const Text("Has llegado a la parada"),
             content: const Text(
               "Has llegado a la parada más cercana. "
-              "Ahora puedes esperar tu transporte.",
+              "Ahora puedes esperar tu ruta.",
             ),
             actions: [
               TextButton(
@@ -112,8 +168,8 @@ class _HomeViewState extends State<HomeView> {
           builder: (_) => AlertDialog(
             title: const Text("Has llegado al sitio de taxis"),
             content: const Text(
-              "Has llegado al sitio de taxis más cercano. "
-              "Ahora puedes abordar tu taxi.",
+              "Has llegado al sitio más cercano. "
+              "Ahora puedes pedir tu taxi.",
             ),
             actions: [
               TextButton(
@@ -245,7 +301,7 @@ class _HomeViewState extends State<HomeView> {
                 sitioVM.tiempoCaminando != null &&
                 sitioVM.distanciaCaminando != null)
               Positioned(
-                bottom: 150,
+                bottom: 28,
                 left: 0,
                 right: 0,
                 child: Center(
@@ -297,7 +353,7 @@ class _HomeViewState extends State<HomeView> {
                 recorridoVM.tiempoCaminando != null &&
                 recorridoVM.distanciaCaminando != null)
               Positioned(
-                bottom: 150, // ajusta si se empalma con los FAB
+                bottom: 28, // ajusta si se empalma con los FAB
                 left: 0,
                 right: 0,
                 child: Center(
@@ -331,6 +387,44 @@ class _HomeViewState extends State<HomeView> {
                   ),
                 ),
               ),
+
+            // 🚌 Botón para ver info de seguimiento de ruta (CU-6)
+            if (!homeVM.switchModo &&
+              homeVM.rutaSeleccionadaId != null &&
+              recorridoVM.paradaObjetivo != null)
+            Positioned(
+              bottom: 96, // ajusta si se empalma con otros botones
+              left: 0,
+              right: 0,
+              child: Center(
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.black87,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    elevation: 4,
+                  ),
+                  onPressed: () {
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: false,
+                      shape: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                      ),
+                      builder: (_) => const Padding(
+                        padding: EdgeInsets.all(16.0),
+                        child: RutaSeguimientoPopup(),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.directions_bus),
+                  label: const Text('Seguimiento de ruta'),
+                ),
+              ),
+            ),
 
             // 🟦 Mensaje de modo
             if (homeVM.mostrandoMensaje) _buildModoMensaje(),
@@ -485,6 +579,14 @@ class _HomeViewState extends State<HomeView> {
                     homeVM.notifyListeners();
 
                     await recorridoVM.dibujarRutaDesdeBD(int.parse(valor));
+                    
+                    // Calcular la parada objetivo (la más cercana al destino) para esta ruta
+                    if (homeVM.destinoSeleccionado != null) {
+                      await recorridoVM.calcularParadaObjetivo(
+                        idRuta: int.parse(valor),
+                        destino: homeVM.destinoSeleccionado!,
+                      );
+                    }
 
                     // 🧭 CU-4: Calcular parada más cercana automáticamente al elegir ruta
                     if (homeVM.ubicacionActual != null) {
@@ -827,6 +929,125 @@ class WalkingInfoPopup extends StatelessWidget {
           children: [
             Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
             Text(value),
+          ],
+        ),
+      );
+}
+
+// 🚌 Popup seguimiento de trayecto en ruta (CU-6)
+class RutaSeguimientoPopup extends StatelessWidget {
+  const RutaSeguimientoPopup({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final recorridoVM = context.watch<RecorridoViewModel>();
+    final homeVM = context.watch<HomeViewModel>();
+
+    // Buscar la ruta seleccionada por id
+    RutaModel? rutaSeleccionada;
+    try {
+      rutaSeleccionada = recorridoVM.rutasCandidatas.firstWhere(
+        (r) => r.idRuta.toString() == homeVM.rutaSeleccionadaId,
+      );
+    } catch (_) {
+      rutaSeleccionada = null;
+    }
+
+    final nombreRuta = rutaSeleccionada?.nombre ?? "—";
+    final parada = recorridoVM.paradaObjetivo?.nombre ?? "—";
+    final distancia = recorridoVM.distanciaRestanteRuta ?? "—";
+    final tiempo = recorridoVM.tiempoRestanteRuta ?? "—";
+
+    final seguimientoActivo = recorridoVM.seguimientoRutaActivo;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.directions_bus),
+                  SizedBox(width: 8),
+                  Text(
+                    "Seguimiento de ruta",
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
+                    ),
+                  ),
+                ],
+              ),
+              IconButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+                icon: const Icon(Icons.close, color: Colors.grey),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 10),
+          _buildInfoRow("Ruta seleccionada:", nombreRuta),
+          _buildInfoRow("Parada para bajar:", parada),
+          _buildInfoRow("Distancia restante:", distancia),
+          _buildInfoRow("Tiempo aprox.:", tiempo),
+
+          const SizedBox(height: 16),
+
+          // Botón iniciar/detener seguimiento CU-6
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () async {
+                final vm = context.read<RecorridoViewModel>();
+
+                if (!vm.seguimientoRutaActivo) {
+                  await vm.iniciarSeguimientoRuta();
+                } else {
+                  await vm.detenerSeguimientoRuta();
+                }
+
+                Navigator.of(context).pop();
+              },
+              icon: Icon(
+                seguimientoActivo ? Icons.stop : Icons.play_arrow,
+              ),
+              label: Text(
+                seguimientoActivo
+                    ? "Detener seguimiento"
+                    : "Iniciar seguimiento",
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+            Flexible(child: Text(value, overflow: TextOverflow.ellipsis)),
           ],
         ),
       );
