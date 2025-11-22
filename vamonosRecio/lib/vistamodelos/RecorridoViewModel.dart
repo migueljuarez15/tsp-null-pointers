@@ -145,6 +145,9 @@ class RecorridoViewModel extends ChangeNotifier {
     _marcadores.clear();
     _rutasCandidatas.clear();
     _destinoSeleccionado = null;
+    _paradaObjetivo = null;
+    _paradaObjetivo = null;
+    limpiarSeguimientoRuta();
     notifyListeners();
   }
 
@@ -265,6 +268,9 @@ class RecorridoViewModel extends ChangeNotifier {
     _marcadores.clear();
     _rutasCandidatas.clear();
     _destinoSeleccionado = null;
+    _paradaObjetivo = null;
+    _paradaObjetivo = null;
+    limpiarSeguimientoRuta();
     notifyListeners();
   }
 
@@ -280,7 +286,8 @@ class RecorridoViewModel extends ChangeNotifier {
   String? _distanciaCaminando;
   String? _tiempoCaminando;
   bool _mostrarPopupCaminando = false;
-
+  ParadaModel? _paradaObjetivo;
+  ParadaModel? get paradaObjetivo => _paradaObjetivo;
   bool get mostrarPopupCaminando => _mostrarPopupCaminando;
   LatLng? get ubicacionActual => _ubicacionActual;
   ParadaModel? get paradaMasCercana => _paradaMasCercana;
@@ -288,6 +295,20 @@ class RecorridoViewModel extends ChangeNotifier {
   bool get mostrandoRutaCaminando => _mostrandoRutaCaminando;
   String? get distanciaCaminando => _distanciaCaminando;
   String? get tiempoCaminando => _tiempoCaminando;
+
+  // CU-6: Seguimiento de trayecto de ruta (dentro del camión)
+  Timer? _timerSeguimientoRuta;
+  bool _seguimientoRutaActivo = false;
+  bool get seguimientoRutaActivo => _seguimientoRutaActivo;
+  String? _distanciaRestanteRuta;
+  String? _tiempoRestanteRuta;
+  String? get distanciaRestanteRuta => _distanciaRestanteRuta;
+  String? get tiempoRestanteRuta => _tiempoRestanteRuta;
+  bool _avisoProximoParada = false; // para aviso anticipado
+  bool get avisoProximoParada => _avisoProximoParada;
+  bool _llegoAutomaticamenteRuta = false; // para diálogo "has llegado en la ruta"
+  bool get llegoAutomaticamenteRuta => _llegoAutomaticamenteRuta;
+
 
   // --- Seguimiento en vivo CU-8 ---
   Timer? _timerSeguimiento;
@@ -349,6 +370,60 @@ class RecorridoViewModel extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint("❌ Error al calcular parada más cercana: $e");
+    }
+  }
+
+  /// 🔵 CU-6: Calcula la parada más cercana AL DESTINO pero SOLO entre paradas de la ruta seleccionada
+  Future<void> calcularParadaObjetivo({
+    required int idRuta,
+    required LatLng destino,
+  }) async {
+    try {
+      final paradas = await _db.obtenerParadasPorRuta(idRuta);
+      if (paradas.isEmpty) return;
+
+      ParadaModel? masCercana;
+      double minDist = double.infinity;
+
+      for (var p in paradas) {
+        final dist = _distanciaMetros(
+          LatLng(p.latitud, p.longitud),
+          destino,
+        );
+
+        if (dist < minDist) {
+          minDist = dist;
+          masCercana = p;
+        }
+      }
+
+      _paradaObjetivo = masCercana;
+
+      // 👉 Añadir marcador visual en el mapa
+      if (_paradaObjetivo != null) {
+        _marcadores.removeWhere((m) => m.markerId.value == "parada_objetivo");
+
+        _marcadores.add(
+          Marker(
+            markerId: const MarkerId("parada_objetivo"),
+            position: LatLng(
+              _paradaObjetivo!.latitud,
+              _paradaObjetivo!.longitud,
+            ),
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+              BitmapDescriptor.hueOrange,
+            ),
+            infoWindow: InfoWindow(
+              title: _paradaObjetivo!.nombre,
+              snippet: "Parada para bajar",
+            ),
+          ),
+        );
+      }
+
+      notifyListeners();
+    } catch (e) {
+      debugPrint("❌ Error al calcular parada objetivo CU-6: $e");
     }
   }
 
@@ -535,6 +610,75 @@ class RecorridoViewModel extends ChangeNotifier {
     );
   }
 
+  /// ▶️ CU-6: Iniciar seguimiento de trayecto de ruta (dentro del camión)
+  Future<void> iniciarSeguimientoRuta() async {
+    if (_paradaObjetivo == null) {
+      debugPrint("⚠️ CU-6: No hay parada objetivo definida para seguimiento.");
+      return;
+    }
+
+    // Pedir permisos de ubicación (reuso lo que ya tienes si quieres)
+    final tienePermiso = await _asegurarPermisoUbicacion();
+    if (!tienePermiso) return;
+
+    _seguimientoRutaActivo = true;
+    _llegoAutomaticamenteRuta = false;
+    // Reiniciamos aviso anticipado
+    _avisoProximoParada = false;
+    notifyListeners();
+
+    // Ubicación inicial
+    final posInicial = await _locationService.getCurrentLocation();
+    if (posInicial != null) {
+      _ubicacionActual = LatLng(posInicial.latitude, posInicial.longitude);
+    }
+
+    final destinoParada = LatLng(
+      _paradaObjetivo!.latitud,
+      _paradaObjetivo!.longitud,
+    );
+
+    // Cancelar cualquier timer previo
+    _timerSeguimientoRuta?.cancel();
+
+    // Timer cada 3 segundos (suficiente para ir en camión sin mareo)
+    _timerSeguimientoRuta = Timer.periodic(
+      const Duration(seconds: 3),
+      (timer) async {
+        if (!_seguimientoRutaActivo) return;
+
+        final pos = await _locationService.getCurrentLocation();
+        if (!_seguimientoRutaActivo) return;
+        if (pos == null) return;
+
+        _ubicacionActual = LatLng(pos.latitude, pos.longitude);
+
+        // Distancia directa a la parada objetivo
+        final distMetros =
+          _distanciaMetros(_ubicacionActual!, destinoParada);
+        _distanciaRestanteRuta = _formatearDistancia(distMetros);
+
+        // Tiempo estimado con velocidad de camión (~ 9 m/s ≈ 32 km/h)
+        const velocidadBus = 9.0; // m/s
+        final segundos = distMetros / velocidadBus;
+        _tiempoRestanteRuta = _formatearTiempo(segundos);
+
+        // 1️⃣ Aviso anticipado cuando esté cerca (ej. 200 m)
+        if (!_avisoProximoParada && distMetros <= 200 && distMetros > 5) {
+          _avisoProximoParada = true; // La vista reaccionará y luego lo apagamos
+        }
+
+        // 2️⃣ Llegada automática (<= 5 m)
+        if (distMetros <= 5) {
+          debugPrint("✅ CU-6: Llegaste a la parada objetivo de la ruta.");
+          await detenerSeguimientoRuta(porLlegadaAuto: true);
+        }
+
+        notifyListeners();
+      },
+    );
+  }
+
     /// 🔁 Recalcula la ruta caminando desde la posición actual hasta la parada
   Future<void> _recalcularRutaCaminandoDesdePosicionActual(
     String apiKey,
@@ -547,6 +691,20 @@ class RecorridoViewModel extends ChangeNotifier {
       destino: destinoParada,
       apiKey: apiKey,
     );
+  }
+
+  /// ⏹ CU-6: Detener seguimiento de trayecto de ruta
+  Future<void> detenerSeguimientoRuta({bool porLlegadaAuto = false}) async {
+    _timerSeguimientoRuta?.cancel();
+    _timerSeguimientoRuta = null;
+
+    _seguimientoRutaActivo = false;
+
+    if (porLlegadaAuto) {
+      _llegoAutomaticamenteRuta = true;
+    }
+
+    notifyListeners();
   }
 
     /// ⏹ Detener seguimiento a pie (CU-8)
@@ -583,6 +741,34 @@ class RecorridoViewModel extends ChangeNotifier {
     _marcadores
         .removeWhere((m) => m.markerId.value == "parada_mas_cercana");
 
+    notifyListeners();
+  }
+
+  /// ❌ Limpia solo el estado del seguimiento de ruta (CU-6)
+  void limpiarSeguimientoRuta() {
+    _timerSeguimientoRuta?.cancel();
+    _timerSeguimientoRuta = null;
+
+    _seguimientoRutaActivo = false;
+    _distanciaRestanteRuta = null;
+    _tiempoRestanteRuta = null;
+    _avisoProximoParada = false;
+    _llegoAutomaticamenteRuta = false;
+
+    notifyListeners();
+  }
+
+  /// Marca que ya se mostró el diálogo de llegada CU-6
+  void marcarDialogoLlegadaRutaMostrado() {
+    if (!_llegoAutomaticamenteRuta) return;
+    _llegoAutomaticamenteRuta = false;
+    notifyListeners();
+  }
+
+  /// Marca que ya se mostró el aviso de "ya casi llegas"
+  void marcarAvisoProximoParadaMostrado() {
+    if (!_avisoProximoParada) return;
+    _avisoProximoParada = false;
     notifyListeners();
   }
 

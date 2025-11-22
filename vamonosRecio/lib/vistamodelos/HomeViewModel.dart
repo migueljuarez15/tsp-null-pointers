@@ -245,6 +245,7 @@ class HomeViewModel extends ChangeNotifier {
   void limpiarSeleccionRutas(RecorridoViewModel recorridoVM) {
     recorridoVM.resetearTodo();
     recorridoVM.limpiarRutaCaminando();
+    recorridoVM.limpiarSeguimientoRuta();
     recorridoVM.ocultarPopupRutaCaminando();
     ocultarParadas = false;
 
