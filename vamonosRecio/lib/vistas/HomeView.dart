@@ -48,13 +48,37 @@ class _HomeViewState extends State<HomeView> {
         );
       }
 
-      // 📍 Seguir al usuario mientras el seguimiento CU-9 está activo
-      if (sitioVM.seguimientoTaxiActivo &&
+      // 📍 Seguir al usuario mientras el seguimiento CU-7 o CU-9 está activo
+      if ((sitioVM.seguimientoTaxiActivo ||
+              sitioVM.seguimientoTrayectoTaxiActivo) &&
           sitioVM.ubicacionActual != null &&
           mapController != null) {
         mapController!.animateCamera(
           CameraUpdate.newLatLng(sitioVM.ubicacionActual!),
         );
+      }
+
+      // ✅ Diálogo de llegada automática al destino del taxi (CU-7)
+      if (sitioVM.llegoAutomaticamenteDestinoTaxi) {
+        showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text("Has llegado a tu destino"),
+            content: const Text(
+              "Has llegado al destino de tu viaje en taxi.",
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+                child: const Text("Aceptar"),
+              ),
+            ],
+          ),
+        );
+
+        sitioVM.marcarDialogoLlegadaDestinoTaxiMostrado();
       }
 
       // ✅ Diálogo de llegada automática a la parada (CU-8)
@@ -110,7 +134,6 @@ class _HomeViewState extends State<HomeView> {
       body: SafeArea(
         child: Stack(
           children: [
-            // 🗺️ Mapa principal
             GoogleMap(
               initialCameraPosition: CameraPosition(
                 target: MapService.centroZacatecas,
@@ -126,8 +149,11 @@ class _HomeViewState extends State<HomeView> {
               polylines: homeVM.switchModo
                   ? sitioVM.polylines
                   : recorridoVM.polylines.union(recorridoVM.rutaCaminando),
-              // OCULTAR PARADAS O SITIOS CUANDO HACE SEGUIMIENTO
-              circles: (!homeVM.switchModo && homeVM.ocultarParadas) ? <Circle>{} : (homeVM.switchModo && homeVM.ocultarSitios) ? <Circle>{} : homeVM.circulos,
+              circles: (!homeVM.switchModo && homeVM.ocultarParadas)
+                  ? <Circle>{}
+                  : (homeVM.switchModo && homeVM.ocultarSitios)
+                      ? <Circle>{}
+                      : homeVM.circulos,
               myLocationEnabled: true,
               myLocationButtonEnabled: true,
               zoomControlsEnabled: false,
@@ -608,6 +634,37 @@ class _TaxiInfoDropdownState extends State<TaxiInfoDropdown> {
                 _buildInfoRowTaxi("Sitio más cercano:", sitio),
                 _buildInfoRowTaxi("Tiempo estimado:", tiempo),
                 _buildInfoRowTaxi("Distancia:", distancia),
+
+                const SizedBox(height: 16),
+
+                // 🔘 Botón CU-7: seguimiento del trayecto del taxi
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      final vm = context.read<SitioViewModel>();
+
+                      if (!vm.seguimientoTrayectoTaxiActivo) {
+                        await vm.iniciarSeguimientoTrayectoTaxi(
+                          apiKey:
+                              'AIzaSyDkcaTrFPn2PafDX85VmT-XEKS2qnk7oe8',
+                        );
+                      } else {
+                        await vm.detenerSeguimientoTrayectoTaxi();
+                      }
+                    },
+                    icon: Icon(
+                      sitioVM.seguimientoTrayectoTaxiActivo
+                          ? Icons.stop
+                          : Icons.play_arrow,
+                    ),
+                    label: Text(
+                      sitioVM.seguimientoTrayectoTaxiActivo
+                          ? "Detener seguimiento de trayecto"
+                          : "Iniciar seguimiento de trayecto",
+                    ),
+                  ),
+                ),
               ],
             )
           : Row(
@@ -754,7 +811,7 @@ class WalkingInfoPopup extends StatelessWidget {
               label: Text(
                 seguimientoActivo
                     ? "Detener seguimiento"
-                    : "Iniciar seguimiento a pie",
+                    : "Iniciar seguimiento",
               ),
             ),
           ),
@@ -877,7 +934,7 @@ class TaxiWalkingPopup extends StatelessWidget {
               label: Text(
                 context.watch<SitioViewModel>().seguimientoTaxiActivo
                 ? "Detener seguimiento"
-                : "Iniciar seguimiento a pie",
+                : "Iniciar seguimiento",
               ),
             ),
           ),
