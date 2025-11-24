@@ -22,6 +22,8 @@ class RecorridoViewModel extends ChangeNotifier {
   Set<Polyline> get polylines => _polylines;
   Set<Marker> get marcadores => _marcadores;
   List<RutaModel> get rutasCandidatas => _rutasCandidatas;
+  String? _errorApiGoogle;
+  String? get errorApiGoogle => _errorApiGoogle;
 
   bool _cargando = false;
   bool get cargando => _cargando;
@@ -148,6 +150,7 @@ class RecorridoViewModel extends ChangeNotifier {
     _paradaObjetivo = null;
     _paradaObjetivo = null;
     limpiarSeguimientoRuta();
+    _errorApiGoogle = null;   // 👈 limpiar también aquí
     notifyListeners();
   }
 
@@ -435,6 +438,7 @@ class RecorridoViewModel extends ChangeNotifier {
     try {
       _cargando = true;
       _rutaCaminando.clear();
+      _errorApiGoogle = null;              // 👈 limpiamos error previo
       notifyListeners();
 
       final url = Uri.parse(
@@ -442,57 +446,73 @@ class RecorridoViewModel extends ChangeNotifier {
       );
 
       final response = await http.get(url);
+
+      if (response.statusCode != 200) {
+        _errorApiGoogle =
+          "Google Maps está experimentando problemas (código ${response.statusCode}). "
+          "Algunos datos pueden no mostrarse o ser inconsistentes.";
+        notifyListeners();
+        return;
+      }
+
       final data = json.decode(response.body);
 
-      if (data['status'] == 'OK') {
-        final route = data['routes'][0];
-        final leg = route['legs'][0];
-
-        // 🟢 Decodificar polyline con PolylinePoints v3
-        final polylinePoints = PolylinePoints(apiKey: apiKey);
-        final decodedPoints = PolylinePoints.decodePolyline(route['overview_polyline']['points']);
-
-        final List<LatLng> polylineCoords = decodedPoints
-          .map((p) => LatLng(p.latitude, p.longitude))
-          .toList();
-
-        // 👉 Guardamos todos los puntos para poder "consumir" la ruta
-        _rutaCaminandoPuntos = polylineCoords;
-
-        _rutaCaminando.clear();
-        _rutaCaminando.add(
-          Polyline(
-            polylineId: const PolylineId("rutaCaminando"),
-            color: const Color.fromARGB(255, 65, 105, 225), // Azul caminata
-            width: 5,
-            points: polylineCoords,
-            patterns: [PatternItem.dot, PatternItem.gap(20)], // línea punteada
-            geodesic: true,
-        ));
-
-        // 🟡 Marcadores de inicio y destino
-        _markers.add(Marker(
-          markerId: const MarkerId("ubicacionActual"),
-          position: origen,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-          infoWindow: const InfoWindow(title: "Tu ubicación"),
-        ));
-
-        _markers.add(Marker(
-          markerId: const MarkerId("paradaCercana"),
-          position: destino,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow),
-          infoWindow: const InfoWindow(title: "Parada más cercana"),
-        ));
-
-        // ⏱ ETA y distancia
-        _tiempoCaminando = leg['duration']['text'];
-        _distanciaCaminando = leg['distance']['text'];
-        _mostrarPopupCaminando = true;
-      } else {
-        debugPrint("Error en la API Directions (walking): ${data['status']}");
+      if (data['status'] != 'OK') {
+        _errorApiGoogle =
+          "Google Maps está experimentando problemas (${data['status']}). "
+          "Algunos datos pueden no mostrarse o ser inconsistentes.";
+        notifyListeners();
+        return;
       }
+
+      final route = data['routes'][0];
+      final leg = route['legs'][0];
+
+      // 🟢 Decodificar polyline con PolylinePoints v3
+      final decodedPoints =
+          PolylinePoints.decodePolyline(route['overview_polyline']['points']);
+
+      final List<LatLng> polylineCoords =
+          decodedPoints.map((p) => LatLng(p.latitude, p.longitude)).toList();
+
+      _rutaCaminandoPuntos = polylineCoords;
+
+      _rutaCaminando.clear();
+      _rutaCaminando.add(
+        Polyline(
+          polylineId: const PolylineId("rutaCaminando"),
+          color: const Color.fromARGB(255, 65, 105, 225),
+          width: 5,
+          points: polylineCoords,
+          patterns: [PatternItem.dot, PatternItem.gap(20)],
+          geodesic: true,
+        ),
+      );
+
+      _markers.add(Marker(
+        markerId: const MarkerId("ubicacionActual"),
+        position: origen,
+        icon: BitmapDescriptor.defaultMarkerWithHue(
+          BitmapDescriptor.hueGreen,
+        ),
+        infoWindow: const InfoWindow(title: "Tu ubicación"),
+      ));
+
+      _markers.add(Marker(
+        markerId: const MarkerId("paradaCercana"),
+        position: destino,
+        icon: BitmapDescriptor.defaultMarkerWithHue(
+          BitmapDescriptor.hueYellow,
+        ),
+        infoWindow: const InfoWindow(title: "Parada más cercana"),
+      ));
+
+      _tiempoCaminando = leg['duration']['text'];
+      _distanciaCaminando = leg['distance']['text'];
+      _mostrarPopupCaminando = true;
     } catch (e) {
+      _errorApiGoogle =
+        "Google Maps está experimentando problemas. Algunos datos pueden no mostrarse o ser inconsistentes.";
       debugPrint("Error al calcular ruta caminando: $e");
     } finally {
       _cargando = false;
@@ -786,6 +806,11 @@ class RecorridoViewModel extends ChangeNotifier {
   void marcarDialogoLlegadaMostrado() {
     if (!_llegoAutomaticamente) return;
     _llegoAutomaticamente = false;
+    notifyListeners();
+  }
+
+  void limpiarErrorApi() {
+    _errorApiGoogle = null;
     notifyListeners();
   }
 }

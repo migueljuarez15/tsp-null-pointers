@@ -51,6 +51,15 @@ class SitioViewModel extends ChangeNotifier {
   bool _llegoAutomaticamenteDestinoTaxi = false;
   bool get llegoAutomaticamenteDestinoTaxi => _llegoAutomaticamenteDestinoTaxi;
 
+  // ⚠️ Error de Google Maps API
+  String? _errorApiGoogle;
+  String? get errorApiGoogle => _errorApiGoogle;
+
+  void limpiarErrorApi() {
+    _errorApiGoogle = null;
+    notifyListeners();
+  }
+
   // 📍 Getters públicos
   List<SitioModel> get sitios => _sitios;
   SitioModel? get sitioMasCercano => _sitioMasCercano;
@@ -115,6 +124,7 @@ class SitioViewModel extends ChangeNotifier {
   }) async {
     try {
       _cargando = true;
+      _errorApiGoogle = null; // 👈 limpiamos error previo
       _markers.clear();
       _polylineTaxi.clear(); // solo limpia las rutas de taxi, no las caminatas
       _polylineTaxiPuntos.clear();
@@ -131,68 +141,86 @@ class SitioViewModel extends ChangeNotifier {
       );
 
       final response = await http.get(url);
+
+      // 🚨 Error HTTP
+      if (response.statusCode != 200) {
+        _errorApiGoogle =
+            "Google Maps está experimentando problemas (código ${response.statusCode}). "
+            "Algunos datos pueden no mostrarse o ser inconsistentes.";
+        notifyListeners();
+        return;
+      }
+
       final data = json.decode(response.body);
 
-      if (data['status'] == 'OK') {
-        final route = data['routes'][0];
-        final leg = route['legs'][0];
+      // 🚨 Error lógico de la API (ZERO_RESULTS, OVER_QUERY_LIMIT, etc.)
+      if (data['status'] != 'OK') {
+        _errorApiGoogle =
+            "Google Maps está experimentando problemas (${data['status']}). "
+            "Algunos datos pueden no mostrarse o ser inconsistentes.";
+        debugPrint("❌ Error en Directions API: ${data['status']}");
+        notifyListeners();
+        return;
+      }
 
-        // 🟡 Decodificar polyline
-        final decodedPoints =
-            PolylinePoints.decodePolyline(route['overview_polyline']['points']);
-        final List<LatLng> polylineCoords =
-            decodedPoints.map((p) => LatLng(p.latitude, p.longitude)).toList();
+      final route = data['routes'][0];
+      final leg = route['legs'][0];
 
-        // 👉 guardamos puntos de la ruta del taxi para poder "consumirlos"
-        _polylineTaxiPuntos = polylineCoords;
+      // 🟡 Decodificar polyline
+      final decodedPoints =
+          PolylinePoints.decodePolyline(route['overview_polyline']['points']);
+      final List<LatLng> polylineCoords =
+          decodedPoints.map((p) => LatLng(p.latitude, p.longitude)).toList();
 
-        _polylineTaxi.add(
-          Polyline(
-            polylineId: const PolylineId("taxiRoute"),
-            color: const Color.fromARGB(255, 255, 96, 96),
-            width: 6,
-            points: polylineCoords,
-          ),
-        );
+      // 👉 guardamos puntos de la ruta del taxi para poder "consumirlos"
+      _polylineTaxiPuntos = polylineCoords;
 
-        // 🟢 Marcadores
-        if (_sitioMasCercano != null) {
-          _markers.add(
-            Marker(
-              markerId: const MarkerId("sitioMasCercano"),
-              position: LatLng(
-                _sitioMasCercano!.latitud,
-                _sitioMasCercano!.longitud,
-              ),
-              icon: BitmapDescriptor.defaultMarkerWithHue(
-                BitmapDescriptor.hueBlue,
-              ),
-              infoWindow: InfoWindow(
-                title: _sitioMasCercano!.nombre,
-                snippet: "Sitio más cercano",
-              ),
-            ),
-          );
-        }
+      _polylineTaxi.add(
+        Polyline(
+          polylineId: const PolylineId("taxiRoute"),
+          color: const Color.fromARGB(255, 255, 96, 96),
+          width: 6,
+          points: polylineCoords,
+        ),
+      );
 
+      // 🟢 Marcadores
+      if (_sitioMasCercano != null) {
         _markers.add(
           Marker(
-            markerId: const MarkerId("destino"),
-            position: destino,
-            icon: BitmapDescriptor.defaultMarkerWithHue(
-              BitmapDescriptor.hueRed,
+            markerId: const MarkerId("sitioMasCercano"),
+            position: LatLng(
+              _sitioMasCercano!.latitud,
+              _sitioMasCercano!.longitud,
             ),
-            infoWindow: const InfoWindow(title: "Destino seleccionado"),
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+              BitmapDescriptor.hueBlue,
+            ),
+            infoWindow: InfoWindow(
+              title: _sitioMasCercano!.nombre,
+              snippet: "Sitio más cercano",
+            ),
           ),
         );
-
-        // ⏱ ETA y distancia (iniciales)
-        _tiempoEstimado = leg['duration']['text'];
-        _distanciaAprox = leg['distance']['text'];
-      } else {
-        debugPrint("❌ Error en Directions API: ${data['status']}");
       }
+
+      _markers.add(
+        Marker(
+          markerId: const MarkerId("destino"),
+          position: destino,
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueRed,
+          ),
+          infoWindow: const InfoWindow(title: "Destino seleccionado"),
+        ),
+      );
+
+      // ⏱ ETA y distancia (iniciales)
+      _tiempoEstimado = leg['duration']['text'];
+      _distanciaAprox = leg['distance']['text'];
     } catch (e) {
+      _errorApiGoogle =
+          "Google Maps está experimentando problemas. Algunos datos pueden no mostrarse o ser inconsistentes.";
       debugPrint("⚠️ Error al calcular ruta taxi: $e");
     } finally {
       _cargando = false;
@@ -214,6 +242,7 @@ class SitioViewModel extends ChangeNotifier {
     _sitioMasCercano = null;
     _ubicacionActual = null;
     _destinoSeleccionado = null;
+    _errorApiGoogle = null; // 👈 limpiamos error también
 
     _timerSeguimientoTaxi?.cancel();
     _timerSeguimientoTaxi = null;
@@ -262,6 +291,7 @@ class SitioViewModel extends ChangeNotifier {
   }) async {
     try {
       _cargando = true;
+      _errorApiGoogle = null; // 👈 limpiamos error previo
       _polylineCaminando.clear();
       _polylineCaminandoPuntos.clear();
       notifyListeners();
@@ -289,67 +319,85 @@ class SitioViewModel extends ChangeNotifier {
       );
 
       final response = await http.get(url);
+
+      // 🚨 Error HTTP
+      if (response.statusCode != 200) {
+        _errorApiGoogle =
+            "Google Maps está experimentando problemas (código ${response.statusCode}). "
+            "Algunos datos pueden no mostrarse o ser inconsistentes.";
+        notifyListeners();
+        return;
+      }
+
       final data = json.decode(response.body);
 
-      if (data['status'] == 'OK') {
-        final route = data['routes'][0];
-        final leg = route['legs'][0];
-
-        // 🔵 Decodificar polyline
-        final decodedPoints =
-            PolylinePoints.decodePolyline(route['overview_polyline']['points']);
-        final List<LatLng> coords =
-            decodedPoints.map((p) => LatLng(p.latitude, p.longitude)).toList();
-
-        // 👉 Guardamos todos los puntos para poder "consumir" la ruta
-        _polylineCaminandoPuntos = coords;
-
-        _polylineCaminando.clear();
-        _polylineCaminando.add(
-          Polyline(
-            polylineId: const PolylineId("walkingToTaxiSite"),
-            color: Colors.blueAccent,
-            width: 5,
-            patterns: [PatternItem.dash(20), PatternItem.gap(10)],
-            points: coords,
-          ),
-        );
-
-        // 🟢 Marcadores
-        _markers.add(
-          Marker(
-            markerId: const MarkerId("origenCaminandoTaxi"),
-            position: origen,
-            infoWindow: const InfoWindow(title: "Tú estás aquí"),
-            icon: BitmapDescriptor.defaultMarkerWithHue(
-              BitmapDescriptor.hueAzure,
-            ),
-          ),
-        );
-
-        _markers.add(
-          Marker(
-            markerId: const MarkerId("sitioMasCercanoCaminando"),
-            position: destino,
-            infoWindow: InfoWindow(
-              title: _sitioMasCercano!.nombre,
-              snippet: "Sitio más cercano",
-            ),
-            icon: BitmapDescriptor.defaultMarkerWithHue(
-              BitmapDescriptor.hueGreen,
-            ),
-          ),
-        );
-
-        // ⏱ ETA y distancia
-        tiempoCaminando = leg['duration']['text'];
-        distanciaCaminando = leg['distance']['text'];
-
-        mostrarPopupTaxiCaminando = true;
-      } else {
+      // 🚨 Error lógico de API
+      if (data['status'] != 'OK') {
+        _errorApiGoogle =
+            "Google Maps está experimentando problemas (${data['status']}). "
+            "Algunos datos pueden no mostrarse o ser inconsistentes.";
         debugPrint("❌ Error Directions API (walking): ${data['status']}");
+        notifyListeners();
+        return;
       }
+
+      final route = data['routes'][0];
+      final leg = route['legs'][0];
+
+      // 🔵 Decodificar polyline
+      final decodedPoints =
+          PolylinePoints.decodePolyline(route['overview_polyline']['points']);
+      final List<LatLng> coords =
+          decodedPoints.map((p) => LatLng(p.latitude, p.longitude)).toList();
+
+      // 👉 Guardamos todos los puntos para poder "consumir" la ruta
+      _polylineCaminandoPuntos = coords;
+
+      _polylineCaminando.clear();
+      _polylineCaminando.add(
+        Polyline(
+          polylineId: const PolylineId("walkingToTaxiSite"),
+          color: Colors.blueAccent,
+          width: 5,
+          patterns: [PatternItem.dash(20), PatternItem.gap(10)],
+          points: coords,
+        ),
+      );
+
+      // 🟢 Marcadores
+      _markers.add(
+        Marker(
+          markerId: const MarkerId("origenCaminandoTaxi"),
+          position: origen,
+          infoWindow: const InfoWindow(title: "Tú estás aquí"),
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueAzure,
+          ),
+        ),
+      );
+
+      _markers.add(
+        Marker(
+          markerId: const MarkerId("sitioMasCercanoCaminando"),
+          position: destino,
+          infoWindow: InfoWindow(
+            title: _sitioMasCercano!.nombre,
+            snippet: "Sitio más cercano",
+          ),
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueGreen,
+          ),
+        ),
+      );
+
+      // ⏱ ETA y distancia
+      tiempoCaminando = leg['duration']['text'];
+      distanciaCaminando = leg['distance']['text'];
+
+      mostrarPopupTaxiCaminando = true;
     } catch (e) {
+      _errorApiGoogle =
+          "Google Maps está experimentando problemas. Algunos datos pueden no mostrarse o ser inconsistentes.";
       debugPrint("⚠️ Error al calcular ruta caminando al sitio: $e");
     } finally {
       _cargando = false;
@@ -599,7 +647,7 @@ class SitioViewModel extends ChangeNotifier {
           }
         }
 
-        // 3️⃣ Llegada automática (≤ 5 m al destino)
+        // 3️⃣ Llegada automática (≤ 10 m al destino)
         if (distMetros <= 10) {
           debugPrint("✅ Has llegado al destino del taxi.");
           await detenerSeguimientoTrayectoTaxi(porLlegadaAuto: true);

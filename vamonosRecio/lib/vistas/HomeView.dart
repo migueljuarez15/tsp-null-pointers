@@ -184,6 +184,27 @@ class _HomeViewState extends State<HomeView> {
 
         sitioVM.marcarDialogoLlegadaTaxiMostrado();
       }
+
+      // Mensajes de error de Google API (CU de Rutas)
+      if (recorridoVM.errorApiGoogle != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(recorridoVM.errorApiGoogle!),
+            duration: const Duration(seconds: 4),
+          ),
+        );
+        recorridoVM.limpiarErrorApi();
+      }
+
+      if (sitioVM.errorApiGoogle != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(sitioVM.errorApiGoogle!),
+            duration: const Duration(seconds: 4),
+          ),
+        );
+        sitioVM.limpiarErrorApi();
+      }
     });
 
     return Scaffold(
@@ -474,6 +495,27 @@ class _HomeViewState extends State<HomeView> {
 
             if (recorridoVM.cargando)
               const Center(child: CircularProgressIndicator()),
+
+            // 🔴 Banner de sin conexión
+          if (homeVM.sinConexion)
+            Positioned(
+              top: 70, // debajo de la barra de búsqueda o donde te guste
+              left: 12,
+              right: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade600,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text(
+                  "Te encuentras sin conexión a Internet. "
+                  "Conéctate para actualizar la información.",
+                  style: TextStyle(color: Colors.white, fontSize: 13),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
           ],
         ),
       ),

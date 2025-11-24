@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:vamonos_recio/services/ConnectivityService.dart';
 import '../services/DatabaseHelper.dart';
 import '../services/LocationService.dart';
 import '../modelos/ParadaModel.dart';
@@ -31,9 +32,14 @@ class HomeViewModel extends ChangeNotifier {
   Set<Circle> circulos = {};             // Círculos de paradas / sitios
   bool ocultarParadas = false; // cuando es true, no se dibujan paradas (circles)
   bool ocultarSitios = false;  // cuando es true, no se dibujan sitios de taxi
+  final ConnectivityService _connectivityService = ConnectivityService();
+  bool sinConexion = false;      // 👈 bandera global
+  String? mensajeErrorApi;      // 👈 para errores de Google/API si quieres
+  bool _inicializado = false;   // lo usamos también para persistencia (ver punto 3)
 
   HomeViewModel() {
     inicializarMapa();
+    inicializarHome(); 
   }
 
   /// Inicializa mapa y obtiene ubicación actual
@@ -56,6 +62,17 @@ class HomeViewModel extends ChangeNotifier {
 
   // ⭐ NUEVO: inicializar la pantalla Home (ubicación + contenido + mensaje de modo)
   Future<void> inicializarHome() async {
+    if (_inicializado) return;        // 👈 evita re-inicializar al volver a la pantalla
+    _inicializado = true;
+
+    // 1) Conectividad
+    _connectivityService.onStatusChange = (bool sinConn) {
+      sinConexion = sinConn;
+      notifyListeners();
+    };
+    await _connectivityService.checkInicial();
+    _connectivityService.iniciar();
+
     await inicializarMapa();      // reutilizamos lo que ya tenías
     await cargarContenido();      // carga paradas o sitios según el modo
 
@@ -379,5 +396,11 @@ class HomeViewModel extends ChangeNotifier {
     if (ocultarSitios == valor) return;
     ocultarSitios = valor;
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _connectivityService.dispose();
+    super.dispose();
   }
 }
