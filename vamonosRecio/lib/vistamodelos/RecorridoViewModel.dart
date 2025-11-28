@@ -788,4 +788,151 @@ class RecorridoViewModel extends ChangeNotifier {
     _llegoAutomaticamente = false;
     notifyListeners();
   }
+
+    /// 📌 PRUEBA UNITARIA SIMULADA CU-6
+  ///
+  /// Simula el seguimiento dentro del camión con varias distancias:
+  ///  - Lejos (sin aviso)
+  ///  - Cerca (activa avisoProximoParada)
+  ///  - Muy cerca (dispara llegada automática y detiene seguimiento)
+  ///
+  /// Imprime en consola el estado en cada paso.
+  Future<void> pruebaUnitariaCu6Simulada() async {
+    // Distancias simuladas en metros:
+    //  1) 500 m -> lejos
+    //  2) 150 m -> debe activar avisoProximoParada
+    //  3) 4 m   -> debe marcar llegada automática y detener seguimiento
+    final distanciasSimuladas = [500.0, 150.0, 4.0];
+
+    // Preparamos el estado como si ya se hubiera definido una parada objetivo
+    _seguimientoRutaActivo = true;
+    _llegoAutomaticamenteRuta = false;
+    _avisoProximoParada = false;
+    _distanciaRestanteRuta = null;
+    _tiempoRestanteRuta = null;
+
+    debugPrint("===== INICIO PRUEBA UNITARIA CU-6 =====");
+
+    for (final distMetros in distanciasSimuladas) {
+      if (!_seguimientoRutaActivo) {
+        debugPrint(
+            "Seguimiento ya está detenido, se detiene la simulación aquí.");
+        break;
+      }
+
+      // Usamos la misma lógica de producción
+      _distanciaRestanteRuta = _formatearDistancia(distMetros);
+
+      const velocidadBus = 9.0; // m/s como en tu código
+      final segundos = distMetros / velocidadBus;
+      _tiempoRestanteRuta = _formatearTiempo(segundos);
+
+      // 1️⃣ Aviso anticipado cuando esté cerca (ej. 200 m > dist > 5)
+      if (!_avisoProximoParada && distMetros <= 200 && distMetros > 5) {
+        _avisoProximoParada = true;
+        debugPrint(
+          "AVISO: Te estás acercando a la parada. "
+          "(dist = ${distMetros.toStringAsFixed(1)} m)",
+        );
+      }
+
+      // 2️⃣ Llegada automática (<= 5 m)
+      if (distMetros <= 5) {
+        debugPrint(
+          "LLEGADA AUTOMÁTICA: Estás en la parada. "
+          "(dist = ${distMetros.toStringAsFixed(1)} m)",
+        );
+        await detenerSeguimientoRuta(porLlegadaAuto: true);
+      }
+
+      // Imprimimos el estado actual
+      debugPrint(
+        "Estado simulación -> "
+        "distanciaRestanteRuta=$_distanciaRestanteRuta, "
+        "tiempoRestanteRuta=$_tiempoRestanteRuta, "
+        "avisoProximoParada=$_avisoProximoParada, "
+        "llegoAutomaticamenteRuta=$_llegoAutomaticamenteRuta, "
+        "seguimientoRutaActivo=$_seguimientoRutaActivo",
+      );
+
+      // Pausa pequeña solo para que en consola se vea separado (en test ni se nota)
+      await Future.delayed(const Duration(milliseconds: 10));
+    }
+
+    debugPrint("===== FIN PRUEBA UNITARIA CU-6 =====");
+  }
+
+    /// 📌 PRUEBA UNITARIA SIMULADA CU-8
+  ///
+  /// Simula el seguimiento a pie hacia la parada más cercana con varias
+  /// distancias:
+  ///  - Lejos (solo actualiza distancia/tiempo).
+  ///  - Distancia intermedia donde se simula un "desvío" y recalculo.
+  ///  - Muy cerca (dispara llegada automática y detiene seguimiento).
+  ///
+  /// Solo imprime en consola, no usa GPS ni Google Maps reales.
+  Future<void> pruebaUnitariaCu8Simulada() async {
+    // Distancias simuladas en metros:
+    //  1) 300 m -> lejos
+    //  2) 80 m  -> punto donde simulamos desvío y "recalculo"
+    //  3) 3 m   -> llegada automática
+    final distanciasSimuladas = [300.0, 80.0, 3.0];
+
+    // Preparamos el estado como si ya se hubiera iniciado el seguimiento
+    _seguimientoActivo = true;
+    _llegoAutomaticamente = false;
+    _distanciaCaminando = null;
+    _tiempoCaminando = null;
+
+    debugPrint("===== INICIO PRUEBA UNITARIA CU-8 =====");
+
+    for (final distMetros in distanciasSimuladas) {
+      if (!_seguimientoActivo) {
+        debugPrint(
+          "Seguimiento ya está detenido, se detiene la simulación aquí.",
+        );
+        break;
+      }
+
+      // ✅ Usamos la misma lógica que en producción para calcular tiempo
+      _distanciaCaminando = "${distMetros.toStringAsFixed(0)} m";
+
+      const velocidadMedia = 1.4; // m/s (~5 km/h)
+      final segundos = distMetros / velocidadMedia;
+      final minutos = (segundos / 60).round();
+      _tiempoCaminando = "$minutos min";
+
+      // 1️⃣ Simular un "desvío" y un posible recalculo de ruta
+      if (distMetros <= 100 && distMetros > 20) {
+        debugPrint(
+          "DESVÍO SIMULADO: el trabajador se alejó de la ruta a pie, "
+          "se debería recalcular el trayecto. "
+          "(dist = ${distMetros.toStringAsFixed(1)} m)",
+        );
+      }
+
+      // 2️⃣ Llegada automática (<= 5 m) como en el código real
+      if (distMetros <= 5) {
+        debugPrint(
+          "LLEGADA AUTOMÁTICA: Has llegado a la parada más cercana. "
+          "(dist = ${distMetros.toStringAsFixed(1)} m)",
+        );
+        await detenerSeguimientoAPie(porLlegadaAuto: true);
+      }
+
+      // Imprimimos el estado actual
+      debugPrint(
+        "Estado simulación CU-8 -> "
+        "distanciaCaminando=$_distanciaCaminando, "
+        "tiempoCaminando=$_tiempoCaminando, "
+        "llegoAutomaticamente=$_llegoAutomaticamente, "
+        "seguimientoActivo=$_seguimientoActivo",
+      );
+
+      // Pequeña pausa solo para separar logs
+      await Future.delayed(const Duration(milliseconds: 10));
+    }
+
+    debugPrint("===== FIN PRUEBA UNITARIA CU-8 =====");
+  }
 }

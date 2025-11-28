@@ -664,4 +664,145 @@ class SitioViewModel extends ChangeNotifier {
     _llegoAutomaticamenteDestinoTaxi = false;
     notifyListeners();
   }
+
+    /// 📌 PRUEBA UNITARIA SIMULADA CU-7
+  ///
+  /// Simula el seguimiento del trayecto en taxi hacia el destino:
+  ///  - Distancias grandes (solo seguimiento normal)
+  ///  - Distancia intermedia (simula posible desvío/recalculo)
+  ///  - Distancia muy corta (dispara llegada automática)
+  ///
+  /// Imprime en consola el estado en cada paso.
+  Future<void> pruebaUnitariaCu7Simulada() async {
+    // Distancias simuladas en metros:
+    //  1) 2000 m -> lejos
+    //  2) 800 m  -> seguimiento normal (podemos simular desvío)
+    //  3) 120 m  -> muy cerca, todavía en camino
+    //  4) 8 m    -> llegada (≤ 10 m)
+    final distanciasSimuladas = [2000.0, 800.0, 120.0, 8.0];
+
+    _seguimientoTrayectoTaxiActivo = true;
+    _llegoAutomaticamenteDestinoTaxi = false;
+    _distanciaAprox = null;
+    _tiempoEstimado = null;
+
+    debugPrint("===== INICIO PRUEBA UNITARIA CU-7 =====");
+
+    const velocidadAuto = 10.0; // m/s, igual que en iniciarSeguimientoTrayectoTaxi
+
+    for (final distMetros in distanciasSimuladas) {
+      if (!_seguimientoTrayectoTaxiActivo) {
+        debugPrint(
+          "Seguimiento de taxi ya detenido, se termina la simulación.",
+        );
+        break;
+      }
+
+      // Misma lógica que en iniciarSeguimientoTrayectoTaxi
+      _distanciaAprox = "${distMetros.toStringAsFixed(0)} m";
+
+      final segundos = distMetros / velocidadAuto;
+      final minutos = (segundos / 60).round();
+      _tiempoEstimado = "$minutos min";
+
+      // Simulación de un posible desvío a mitad del trayecto
+      if (distMetros == 800.0) {
+        debugPrint(
+          "Simulación: el taxi se desvía del trayecto aproximado. "
+          "Se recalcularía la ruta en un escenario real.",
+        );
+      }
+
+      // Llegada automática (CU-7): ≤ 10 m al destino
+      if (distMetros <= 10) {
+        debugPrint(
+          "CU-7: Has llegado al destino del taxi (dist = "
+          "${distMetros.toStringAsFixed(1)} m).",
+        );
+        await detenerSeguimientoTrayectoTaxi(porLlegadaAuto: true);
+      }
+
+      // Imprimimos estado actual
+      debugPrint(
+        "Estado simulación CU-7 -> "
+        "distanciaAprox=$_distanciaAprox, "
+        "tiempoEstimado=$_tiempoEstimado, "
+        "seguimientoTrayectoTaxiActivo=$_seguimientoTrayectoTaxiActivo, "
+        "llegoAutomaticamenteDestinoTaxi=$_llegoAutomaticamenteDestinoTaxi",
+      );
+
+      await Future.delayed(const Duration(milliseconds: 10));
+    }
+
+    debugPrint("===== FIN PRUEBA UNITARIA CU-7 =====");
+  }
+
+    /// 📌 PRUEBA UNITARIA SIMULADA CU-9
+  ///
+  /// Simula el seguimiento a pie hacia el sitio de taxis más cercano:
+  ///  - 300 m: lejos (solo seguimiento normal)
+  ///  - 80 m : punto medio (simula posible desvío/recalculo)
+  ///  - 3 m  : llegada automática al sitio (≤ 5 m)
+  ///
+  /// Imprime en consola el estado en cada paso.
+  Future<void> pruebaUnitariaCu9Simulada() async {
+    // Distancias simuladas en metros:
+    final distanciasSimuladas = [300.0, 80.0, 3.0];
+
+    _seguimientoTaxiActivo = true;
+    _llegoAutomaticamenteTaxi = false;
+    distanciaCaminando = null;
+    tiempoCaminando = null;
+
+    debugPrint("===== INICIO PRUEBA UNITARIA CU-9 =====");
+
+    const velocidadMedia = 1.4; // m/s, igual que en iniciarSeguimientoAPieSitioTaxi
+
+    for (final distMetros in distanciasSimuladas) {
+      if (!_seguimientoTaxiActivo) {
+        debugPrint(
+          "Seguimiento a pie al sitio ya detenido, se termina la simulación.",
+        );
+        break;
+      }
+
+      // Misma lógica que en iniciarSeguimientoAPieSitioTaxi
+      distanciaCaminando = "${distMetros.toStringAsFixed(0)} m";
+
+      final segundos = distMetros / velocidadMedia;
+      final minutos = (segundos / 60).round();
+      tiempoCaminando = "$minutos min";
+
+      // Simulación de posible desvío a mitad del trayecto
+      if (distMetros == 80.0) {
+        debugPrint(
+          "Simulación: el trabajador se desvía del trayecto hacia el sitio. "
+          "En la app real se recalcularía la ruta a pie.",
+        );
+      }
+
+      // Llegada automática (CU-9): ≤ 5 m al sitio
+      if (distMetros <= 5) {
+        debugPrint(
+          "CU-9: Has llegado al sitio de taxis más cercano "
+          "(dist = ${distMetros.toStringAsFixed(1)} m).",
+        );
+        await detenerSeguimientoAPieSitioTaxi(porLlegadaAuto: true);
+      }
+
+      // Imprimimos el estado actual
+      debugPrint(
+        "Estado simulación CU-9 -> "
+        "distanciaCaminando=$distanciaCaminando, "
+        "tiempoCaminando=$tiempoCaminando, "
+        "seguimientoTaxiActivo=$_seguimientoTaxiActivo, "
+        "llegoAutomaticamenteTaxi=$_llegoAutomaticamenteTaxi",
+      );
+
+      // Pequeña pausa para separar los logs (en test casi ni se nota)
+      await Future.delayed(const Duration(milliseconds: 10));
+    }
+
+    debugPrint("===== FIN PRUEBA UNITARIA CU-9 =====");
+  }
 }
